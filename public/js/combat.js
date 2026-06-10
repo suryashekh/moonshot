@@ -14,6 +14,21 @@
 
   function makeRocketMesh(kind) {
     const grp = new THREE.Group();
+    if (kind === 'blast') {        // pulse-blaster bolt: short cyan tracer
+      const bolt = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.09, 0.09, 1.6, 6),
+        new THREE.MeshBasicMaterial({ color: 0x8df3ff })
+      );
+      bolt.rotation.x = Math.PI / 2;
+      grp.add(bolt);
+      const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: G.glowTex, color: 0x55e8ff,
+        transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+      }));
+      glow.scale.setScalar(1.6);
+      grp.add(glow);
+      return grp;
+    }
     const body = new THREE.Mesh(
       new THREE.CylinderGeometry(0.16, 0.16, 1.1, 8),
       new THREE.MeshStandardMaterial({
@@ -38,7 +53,33 @@
     const mesh = makeRocketMesh(m.kind);
     G.scene.add(mesh);
     rockets.set(m.id, { mesh, x: m.x, z: m.z, yaw: m.yaw, speed: m.speed, kind: m.kind });
-    G.beep(m.kind === 'hrocket' ? 220 : 180, 180, 'sawtooth', 0.06);
+    if (m.kind === 'blast') G.beep(1300, 60, 'square', 0.045);
+    else G.beep(m.kind === 'hrocket' ? 220 : 180, 180, 'sawtooth', 0.06);
+  };
+
+  /* ---------------- pulse blaster (mine) ---------------- */
+  G.gun = { shots: S.GUN.shots, rechargeAt: 0, lastFire: 0 };
+  G.fireGun = function () {
+    const st = G.state, now = performance.now();
+    if (st.phase !== 'race' || st.controlsLocked || st.finished) return;
+    if (now - G.gun.lastFire < S.GUN.fireGapMs - 30) return;
+    if (G.gun.shots <= 0 && G.serverNow() < G.gun.rechargeAt) {
+      G.beep(160, 60, 'square', 0.03);   // dry click
+      return;
+    }
+    G.gun.lastFire = now;
+    G.net.send({ t: 'gun' });
+  };
+  G.onAmmo = function (m) {
+    G.gun.shots = m.shots;
+    if (m.rechargeAt) {
+      G.gun.rechargeAt = m.rechargeAt;
+      G.beep(300, 160, 'sine', 0.05);    // mag empty
+    }
+  };
+  G.resetGun = function () {
+    G.gun.shots = S.GUN.shots;
+    G.gun.rechargeAt = 0;
   };
 
   G.onRocketBoom = function (m) {
@@ -76,8 +117,8 @@
       const y = G.terrainHeight(r.x, r.z) + 1.4;
       r.mesh.position.set(r.x, y, r.z);
       r.mesh.rotation.y = r.yaw;
-      // exhaust
-      if (Math.random() < dt * 40) {
+      // exhaust (blaster bolts fly clean)
+      if (r.kind !== 'blast' && Math.random() < dt * 40) {
         G.spawnDust(r.x - Math.sin(r.yaw) * 0.8, y, r.z - Math.cos(r.yaw) * 0.8,
           (Math.random() - 0.5) * 1.5, 0.5 + Math.random(), (Math.random() - 0.5) * 1.5,
           0.14, 0.6, 0.55, -1000);

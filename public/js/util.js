@@ -135,6 +135,7 @@ window.G = {};
     shieldUntil: 0, empUntil: 0, boostUntil: 0, gstabUntil: 0,
     invulnUntil: 0, deadUntil: 0, decoyUntil: 0,
     quakeUntil: 0, stormUntil: 0, flareUntil: 0,
+    gravUntil: 0, gravScale: 1,
   };
   G.serverNow = () => performance.now() + G.state.serverOffset; // mapped to server Date.now()
 })();

@@ -140,7 +140,10 @@
         st.controlsLocked = true;
         st.finished = false;
         st.hp = 100; st.items = []; st.itemSel = 0;
+        st.gravUntil = 0; st.gravScale = 1;
         G.hud.resetStreak();
+        if (G.resetGun) G.resetGun();
+        if (G.clearAliens) G.clearAliens();
         st.lap = 1; st.nextGate = 0; st.bestLap = 0;
         st.shieldUntil = st.empUntil = st.boostUntil = st.gstabUntil = 0;
         st.deadUntil = st.invulnUntil = 0;
@@ -177,6 +180,7 @@
           if (r) { r.push(m.ts, x, y, z, yaw, vf, f); r.hp = hp; r.lap = lap; r.rank = rank; r.nextGate = nextGate; }
         }
         G.syncRockets(m.pr || []);
+        if (G.syncAliens) G.syncAliens(m.al || []);
         break;
       }
 
@@ -218,6 +222,7 @@
         st.controlsLocked = true;
         G.hideEndScreen();
         G.clearAsteroids(); G.clearCombat();
+        if (G.clearAliens) G.clearAliens();
         G.enterLobbyView();
         break;
 
@@ -258,6 +263,41 @@
       case 'empBlast':   G.onEmpBlast(m);   break;
       case 'lockOn':     G.onLockOn(m);     break;
       case 'meteorWarn': G.onMeteorWarn(m); break;
+      case 'ammo':       G.onAmmo(m);       break;
+
+      /* aliens */
+      case 'alienSpawn': G.onAlienSpawn(m); break;
+      case 'alienHit':   G.onAlienHit(m);   break;
+      case 'alienDead':  G.onAlienDead(m);  break;
+      case 'alienGone':  G.onAlienGone(m);  break;
+      case 'alienZap':   G.onAlienZap(m);   break;
+
+      /* universal gravity wave */
+      case 'grav': {
+        st.gravUntil = m.until;
+        st.gravScale = m.scale;
+        const who = m.by === st.myId ? 'YOU' : ((G.remotes.get(m.by) || {}).name || '?');
+        G.hud.alert(m.scale < 1 ? '∿ LOW GRAVITY — ' + who + ' broke the moon!'
+                                : '∿ HEAVY GRAVITY — ' + who + ' turned it up!', 3200);
+        G.beep(m.scale < 1 ? 880 : 110, 700, 'sine', 0.09);
+        break;
+      }
+
+      /* warp swap */
+      case 'teleport': {
+        if (m.id === st.myId) {
+          st.nextGate = m.nextGate; st.lap = m.lap;
+          st.invulnUntil = G.serverNow() + 1200;
+          G.placeRoverAt(m.x, m.z, m.heading);
+          G.hud.alert(m.by === st.myId ? '⇋ WARPED AHEAD' : '⇋ WARP-SWAPPED!', 2400);
+          G.beep(1500, 200, 'sine', 0.08);
+          G.beep(500, 350, 'sine', 0.06);
+        } else {
+          const r = G.remotes.get(m.id);
+          if (r) r.buf.length = 0;   // drop stale interpolation through the warp
+        }
+        break;
+      }
 
       case 'damage': {
         if (m.id === st.myId) {

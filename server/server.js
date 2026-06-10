@@ -87,6 +87,10 @@ class Room {
     this.mines = [];
     this.traps = [];
     this.asteroids = [];           // pending impacts
+    this.aliens = [];
+    this.nextAlienAt = 0;
+    this.gravUntil = 0;            // universal GRAV WAVE
+    this.gravScale = 1;
     this.crates = S.CRATES.map(c => ({ id: c.id, x: c.x, z: c.z, up: true, respawnAt: 0 }));
     this.raceStartTs = 0;
     this.nextAsteroidAt = 0;
@@ -130,6 +134,7 @@ class Room {
       finished: false, totalMs: 0, rank: 1, progress: 0,
       // combat
       hp: S.DMG.maxHp, items: [], useCooldownUntil: 0,
+      gunShots: S.GUN.shots, gunRechargeAt: 0, lastGunAt: 0,
       shieldUntil: 0, empUntil: 0, boostUntil: 0, gstabUntil: 0, decoyUntil: 0,
       deadUntil: 0, invulnUntil: 0, lastRamAt: 0, lastOuchAt: 0,
       disconnectedAt: 0,
@@ -154,11 +159,14 @@ class Room {
     this.state = 'countdown';
     this.projectiles.length = 0; this.mines.length = 0;
     this.traps.length = 0; this.asteroids.length = 0;
+    this.aliens.length = 0;
+    this.gravUntil = 0; this.gravScale = 1;
     for (const c of this.crates) { c.up = true; c.respawnAt = 0; }
     let i = 0;
     for (const p of this.players.values()) {
       p.lap = 1; p.nextGate = 0; p.gatesPassed = 0; p.bestLap = 0;
       p.finished = false; p.totalMs = 0; p.hp = S.DMG.maxHp; p.items.length = 0;
+      p.gunShots = S.GUN.shots; p.gunRechargeAt = 0; p.lastGunAt = 0;
       p.shieldUntil = p.empUntil = p.boostUntil = p.gstabUntil = p.decoyUntil = 0;
       p.deadUntil = 0; p.invulnUntil = 0; p.startIdx = i++;
     }
@@ -179,6 +187,7 @@ class Room {
         this.nextAsteroidAt = t0 + 8000;
         this.nextShowerAt = 0;
         this.nextHazardAt = t0 + 20000;
+        this.nextAlienAt = t0 + 13000;
         this.broadcast({ t: 'go', ts: t0 });
       }
     };
@@ -202,11 +211,15 @@ class Room {
   applyDamage(victim, dmg, kind, srcId, fx) {
     const t = now();
     if (victim.finished || victim.deadUntil > t || victim.invulnUntil > t) return false;
-    const major = (kind !== 'emp' && kind !== 'ram' && kind !== 'rock');
-    if (victim.shieldUntil > t && major) {
-      victim.shieldUntil = 0;
-      this.broadcast({ t: 'fx', kind: 'shieldBreak', id: victim.id });
-      return false;
+    const major = (kind !== 'emp' && kind !== 'ram' && kind !== 'rock' && kind !== 'blast' && kind !== 'alien');
+    if (victim.shieldUntil > t) {
+      // shield soaks blaster bolts & alien zaps without breaking
+      if (kind === 'blast' || kind === 'alien') return false;
+      if (major) {
+        victim.shieldUntil = 0;
+        this.broadcast({ t: 'fx', kind: 'shieldBreak', id: victim.id });
+        return false;
+      }
     }
     victim.hp = Math.max(0, victim.hp - dmg);
     this.broadcast({ t: 'damage', id: victim.id, hp: victim.hp, dmg, kind, src: srcId || 0, fx: fx || null });
@@ -384,6 +397,58 @@ class Room {
         this.broadcast({ t: 'rocket', id: r.id, kind: 'srocket', owner: p.id, x: r.x, z: r.z, yaw: r.yaw, speed: r.speed });
         break;
       }
+      case 'tri': {
+        // three-rocket fan
+        for (const off of [-S.COMBAT.triSpread, 0, S.COMBAT.triSpread]) {
+          const yaw = p.yaw + off;
+          const r = {
+            id: nextEntityId++, kind: 'srocket', owner: p.id,
+            x: p.x + Math.sin(yaw) * 2.2, z: p.z + Math.cos(yaw) * 2.2,
+            yaw, speed: S.COMBAT.srocketSpeed + Math.max(p.vf, 0),
+            dieAt: t + S.COMBAT.srocketLifeMs, target: 0, decoyed: false,
+            dmg: S.COMBAT.triDmg,
+          };
+          this.projectiles.push(r);
+          this.broadcast({ t: 'rocket', id: r.id, kind: 'srocket', owner: p.id, x: r.x, z: r.z, yaw: r.yaw, speed: r.speed });
+        }
+        break;
+      }
+      case 'warp': {
+        // swap positions with the racer one rank ahead of you
+        let mark = null;
+        for (const q of this.players.values()) {
+          if (q.id === p.id || q.finished || q.deadUntil > t) continue;
+          if (q.rank < p.rank && (!mark || q.rank > mark.rank)) mark = q;
+        }
+        if (!mark) {            // already leading: consolation boost
+          p.boostUntil = t + S.COMBAT.boostMs;
+          this.broadcast({ t: 'fx', kind: 'boost', id: p.id, until: p.boostUntil });
+          break;
+        }
+        const [px, pz, py] = [p.x, p.z, p.yaw];
+        p.x = mark.x; p.z = mark.z; p.yaw = mark.yaw;
+        mark.x = px; mark.z = pz; mark.yaw = py;
+        // swap race progress too, otherwise the warp is pointless
+        [p.nextGate, mark.nextGate] = [mark.nextGate, p.nextGate];
+        [p.lap, mark.lap] = [mark.lap, p.lap];
+        [p.gatesPassed, mark.gatesPassed] = [mark.gatesPassed, p.gatesPassed];
+        [p.lapStartTs, mark.lapStartTs] = [mark.lapStartTs, p.lapStartTs];
+        p.invulnUntil = mark.invulnUntil = t + 1200;
+        for (const q of [p, mark]) {
+          this.broadcast({
+            t: 'teleport', id: q.id, x: q.x, z: q.z, heading: q.yaw,
+            nextGate: q.nextGate, lap: q.lap, by: p.id,
+          });
+        }
+        break;
+      }
+      case 'gravity': {
+        // universal power: gravity flips for EVERYONE for a while
+        this.gravScale = this.rng() < 0.5 ? S.COMBAT.gravityLow : S.COMBAT.gravityHeavy;
+        this.gravUntil = t + S.COMBAT.gravityMs;
+        this.broadcast({ t: 'grav', scale: this.gravScale, until: this.gravUntil, by: p.id });
+        break;
+      }
       case 'hrocket': {
         // target: nearest opponent AHEAD in race progress, else nearest
         let best = null, bestScore = Infinity;
@@ -426,6 +491,104 @@ class Room {
     }
   }
 
+  /* ----- pulse blaster (everyone has one; magazine + recharge gap) ----- */
+  fireGun(p) {
+    const t = now();
+    if (this.state !== 'race' || p.finished || p.deadUntil > t) return;
+    if (t - p.lastGunAt < S.GUN.fireGapMs) return;
+    if (p.gunShots <= 0) {
+      if (t >= p.gunRechargeAt) p.gunShots = S.GUN.shots;   // recharged
+      else return;                                          // still in the gap
+    }
+    p.lastGunAt = t;
+    p.gunShots--;
+    if (p.gunShots <= 0) p.gunRechargeAt = t + S.GUN.rechargeMs;
+    const r = {
+      id: nextEntityId++, kind: 'blast', owner: p.id,
+      x: p.x + Math.sin(p.yaw) * 2.0, z: p.z + Math.cos(p.yaw) * 2.0,
+      yaw: p.yaw, speed: S.GUN.speed + Math.max(p.vf, 0),
+      dieAt: t + S.GUN.lifeMs, target: 0, decoyed: false, dmg: S.GUN.dmg,
+    };
+    this.projectiles.push(r);
+    this.broadcast({ t: 'rocket', id: r.id, kind: 'blast', owner: p.id, x: r.x, z: r.z, yaw: r.yaw, speed: r.speed });
+    send(p.ws, { t: 'ammo', shots: p.gunShots, rechargeAt: p.gunShots <= 0 ? p.gunRechargeAt : 0 });
+  }
+
+  /* ----- aliens ----- */
+  spawnAlien() {
+    const t = now();
+    const alive = [...this.players.values()].filter(p => !p.finished && p.deadUntil < t);
+    if (!alive.length) return;
+    // materialize ahead of a random racer, just off the racing line
+    const p = alive[(this.rng() * alive.length) | 0];
+    const a = (Math.atan2(p.z, p.x) + 0.25 + this.rng() * 0.25 + S.TAU) % S.TAU;
+    const r = S.trackRadius(a) + (this.rng() * 2 - 1) * 20;
+    const al = {
+      id: nextEntityId++,
+      x: Math.cos(a) * r, z: Math.sin(a) * r,
+      hp: S.ALIEN.hp, dieAt: t + S.ALIEN.lifeMs, nextAttackAt: 0,
+      wanderA: this.rng() * S.TAU,
+    };
+    this.aliens.push(al);
+    this.broadcast({ t: 'alienSpawn', id: al.id, x: al.x, z: al.z, hp: al.hp });
+  }
+
+  hurtAlien(al, dmg, byId) {
+    al.hp -= dmg;
+    if (al.hp > 0) {
+      this.broadcast({ t: 'alienHit', id: al.id, hp: al.hp, by: byId });
+      return false;
+    }
+    this.aliens.splice(this.aliens.indexOf(al), 1);
+    const killer = this.players.get(byId);
+    let bounty = null;
+    if (killer && killer.items.length < S.MAX_ITEMS) {
+      bounty = S.rollItem(0.75, this.rng);     // alien loot skews offensive
+      killer.items.push(bounty);
+    }
+    this.broadcast({ t: 'alienDead', id: al.id, by: byId || 0, bounty });
+    return true;
+  }
+
+  tickAliens(t, dt) {
+    for (let i = this.aliens.length - 1; i >= 0; i--) {
+      const al = this.aliens[i];
+      if (t > al.dieAt) {
+        this.aliens.splice(i, 1);
+        this.broadcast({ t: 'alienGone', id: al.id });
+        continue;
+      }
+      // hunt the nearest living racer in aggro range
+      let prey = null, best = S.ALIEN.aggroR * S.ALIEN.aggroR;
+      for (const p of this.players.values()) {
+        if (p.finished || p.deadUntil > t) continue;
+        const d2 = dist2(al.x, al.z, p.x, p.z);
+        if (d2 < best) { best = d2; prey = p; }
+      }
+      if (prey) {
+        const d = Math.sqrt(best) || 1;
+        if (d > S.ALIEN.attackR * 0.6) {
+          al.x += ((prey.x - al.x) / d) * S.ALIEN.speed * dt;
+          al.z += ((prey.z - al.z) / d) * S.ALIEN.speed * dt;
+        }
+        if (d < S.ALIEN.attackR && t >= al.nextAttackAt) {
+          al.nextAttackAt = t + S.ALIEN.attackMs;
+          this.broadcast({ t: 'alienZap', id: al.id, target: prey.id });
+          this.applyDamage(prey, S.ALIEN.dmg, 'alien', 0, { kx: prey.x - al.x, kz: prey.z - al.z, mag: 3 });
+        }
+      } else {
+        // idle drift along the ring
+        al.wanderA += (this.rng() - 0.5) * 0.4 * dt;
+        al.x += Math.cos(al.wanderA) * S.ALIEN.speed * 0.3 * dt;
+        al.z += Math.sin(al.wanderA) * S.ALIEN.speed * 0.3 * dt;
+      }
+    }
+    if (t >= this.nextAlienAt && this.nextAlienAt) {
+      if (this.aliens.length < S.ALIEN.maxAlive) this.spawnAlien();
+      this.nextAlienAt = t + S.ALIEN.spawnMsMin + this.rng() * (S.ALIEN.spawnMsMax - S.ALIEN.spawnMsMin);
+    }
+  }
+
   /* ----- per-tick simulation (30 Hz) ----- */
   tick() {
     const t = now();
@@ -461,8 +624,21 @@ class Room {
       r.x += Math.sin(r.yaw) * r.speed * dt;
       r.z += Math.cos(r.yaw) * r.speed * dt;
 
+      // hit aliens (every projectile kind hurts them)
+      let alHit = false;
+      for (const al of this.aliens) {
+        if (dist2(r.x, r.z, al.x, al.z) < 3.4 * 3.4) {
+          this.broadcast({ t: 'rocketBoom', id: r.id, x: r.x, z: r.z, victim: 0 });
+          this.hurtAlien(al, r.dmg || (r.kind === 'hrocket' ? S.DMG.hrocket : S.DMG.srocket), r.owner);
+          alHit = true;
+          break;
+        }
+      }
+      if (alHit) { this.projectiles.splice(i, 1); continue; }
+
       // hit players
-      const hitR = r.kind === 'hrocket' ? S.COMBAT.hrocketHitR : S.COMBAT.srocketHitR;
+      const hitR = r.kind === 'hrocket' ? S.COMBAT.hrocketHitR
+        : r.kind === 'blast' ? S.GUN.hitR : S.COMBAT.srocketHitR;
       let hit = null;
       for (const q of this.players.values()) {
         if (q.id === r.owner || q.finished || q.deadUntil > t || q.invulnUntil > t) continue;
@@ -541,6 +717,9 @@ class Room {
         this.nextShowerAt = t + 20000 + this.rng() * 10000;
       }
     }
+
+    /* aliens */
+    this.tickAliens(t, dt);
 
     /* hazard events from lap 2 */
     if (lap >= 2 && t >= this.nextHazardAt) {
@@ -637,7 +816,8 @@ class Room {
           +p.yaw.toFixed(3), +p.vf.toFixed(2), f, p.hp, p.lap, p.nextGate, p.rank]);
       }
       const pr = this.projectiles.map(r => [r.id, +r.x.toFixed(1), +r.z.toFixed(1), +r.yaw.toFixed(2)]);
-      this.broadcast({ t: 'snap', ts: t, ps, pr });
+      const al = this.aliens.map(a => [a.id, +a.x.toFixed(1), +a.z.toFixed(1), a.hp]);
+      this.broadcast({ t: 'snap', ts: t, ps, pr, al });
     }
   }
 
@@ -646,10 +826,10 @@ class Room {
     const z = victim ? victim.z : r.z;
     this.broadcast({ t: 'rocketBoom', id: r.id, x, z, victim: victim ? victim.id : 0 });
     if (victim) {
-      const dmg = r.kind === 'hrocket' ? S.DMG.hrocket : S.DMG.srocket;
+      const dmg = r.dmg || (r.kind === 'hrocket' ? S.DMG.hrocket : S.DMG.srocket);
       this.applyDamage(victim, dmg, r.kind, r.owner, {
         kx: victim.x - (r.x - Math.sin(r.yaw)), kz: victim.z - (r.z - Math.cos(r.yaw)),
-        mag: 10, spin: 1,
+        mag: r.kind === 'blast' ? 3 : 10, spin: r.kind === 'blast' ? 0 : 1,
       });
     }
   }
@@ -733,6 +913,7 @@ wss.on('connection', (ws) => {
         break;
       }
       case 'use': if (room && player) room.useItem(player, m.slot); break;
+      case 'gun': if (room && player) room.fireGun(player); break;
       case 'ouch': {
         // client-reported environmental damage, clamped + rate-limited
         if (!room || !player || room.state !== 'race') return;
