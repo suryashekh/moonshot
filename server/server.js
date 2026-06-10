@@ -305,8 +305,9 @@ class Room {
         const p = alive[(this.rng() * alive.length) | 0];
         const lead = warn / 1000;
         const sa = this.rng() * S.TAU, sr = 1.5 + this.rng() * 7;
-        x = p.x + Math.sin(p.yaw) * p.vf * lead + Math.cos(sa) * sr;
-        z = p.z + Math.cos(p.yaw) * p.vf * lead + Math.sin(sa) * sr;
+        // wrap the led impact point so rocks still land on a racer crossing the seam
+        x = S.wrapCoord(p.x + Math.sin(p.yaw) * p.vf * lead + Math.cos(sa) * sr);
+        z = S.wrapCoord(p.z + Math.cos(p.yaw) * p.vf * lead + Math.sin(sa) * sr);
         targetId = p.id;
       } else {
         const a = this.rng() * S.TAU;
@@ -667,6 +668,7 @@ class Room {
         al.x += Math.cos(al.wanderA) * S.ALIEN.speed * 0.3 * dt;
         al.z += Math.sin(al.wanderA) * S.ALIEN.speed * 0.3 * dt;
       }
+      al.x = S.wrapCoord(al.x); al.z = S.wrapCoord(al.z);   // open world
     }
     if (t >= this.nextAlienAt && this.nextAlienAt) {
       if (this.aliens.length < S.ALIEN.maxAlive) this.spawnAlien();
@@ -750,8 +752,9 @@ class Room {
         this.projectiles.splice(i, 1);
         continue;
       }
-      const B = S.WORLD.terrainSize / 2 - 10;
-      if (t > r.dieAt || Math.abs(r.x) > B || Math.abs(r.z) > B) {
+      // open world: projectiles cross the seam like everything else
+      r.x = S.wrapCoord(r.x); r.z = S.wrapCoord(r.z);
+      if (t > r.dieAt) {
         this.boomRocket(r, null);
         this.projectiles.splice(i, 1);
       }
@@ -988,12 +991,13 @@ wss.on('connection', (ws) => {
       }
       case 'state': {
         if (!room || !player || player.deadUntil > t) return;
-        // light validation: clamp teleports & speeds
-        const nx = +m.p[0], ny = +m.p[1], nz = +m.p[2];
+        // light validation: clamp teleports & speeds (wrap-aware: a seam
+        // crossing is a legal "teleport" of one world period)
+        const nx = S.wrapCoord(+m.p[0]), ny = +m.p[1], nz = S.wrapCoord(+m.p[2]);
         if (!isFinite(nx) || !isFinite(ny) || !isFinite(nz)) return;
         if (player.lastStateTs) {
           const dts = Math.max((t - player.lastStateTs) / 1000, 0.02);
-          const d = Math.sqrt(dist2(nx, nz, player.x, player.z));
+          const d = Math.hypot(S.wrapDelta(nx - player.x), S.wrapDelta(nz - player.z));
           if (d / dts > 60) return;  // > 60 m/s sustained = reject
         }
         player.lastStateTs = t;

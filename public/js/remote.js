@@ -66,7 +66,11 @@
       let x, y, z, yaw, vf;
       if (p1 && p1.ts > p0.ts) {
         const t = clamp((rt - p0.ts) / (p1.ts - p0.ts), 0, 1);
-        x = lerp(p0.x, p1.x, t); y = lerp(p0.y, p1.y, t); z = lerp(p0.z, p1.z, t);
+        // wrap-aware lerp: a snapshot pair straddling the world seam is one
+        // short hop across it, not a full-map glide
+        x = S.wrapCoord(p0.x + S.wrapDelta(p1.x - p0.x) * t);
+        z = S.wrapCoord(p0.z + S.wrapDelta(p1.z - p0.z) * t);
+        y = lerp(p0.y, p1.y, t);
         let dy = p1.yaw - p0.yaw;
         if (dy > Math.PI) dy -= Math.PI * 2; if (dy < -Math.PI) dy += Math.PI * 2;
         yaw = p0.yaw + dy * t;
@@ -74,27 +78,33 @@
       } else {
         // brief extrapolation from the last sample's heading + speed
         const ageS = clamp((rt - p0.ts) / 1000, 0, 0.25);
-        x = p0.x + Math.sin(p0.yaw) * p0.vf * ageS;
-        z = p0.z + Math.cos(p0.yaw) * p0.vf * ageS;
+        x = S.wrapCoord(p0.x + Math.sin(p0.yaw) * p0.vf * ageS);
+        z = S.wrapCoord(p0.z + Math.cos(p0.yaw) * p0.vf * ageS);
         y = p0.y; yaw = p0.yaw; vf = p0.vf;
       }
 
-      const vx = (x - this.prevX) / Math.max(dt, 1e-3);
-      const vz = (z - this.prevZ) / Math.max(dt, 1e-3);
+      const vx = S.wrapDelta(x - this.prevX) / Math.max(dt, 1e-3);
+      const vz = S.wrapDelta(z - this.prevZ) / Math.max(dt, 1e-3);
       this.prevX = x; this.prevZ = z;
       this.x = x; this.y = y; this.z = z; this.yaw = yaw; this.vf = vf;
       this.velX = vx; this.velZ = vz;   // for local car-vs-car collision response
 
-      const gy = G.terrainHeight(x, z);
+      // draw at the wrap image nearest the LOCAL player, so a rover just across
+      // the seam appears right there (in the preview strip), not a world away
+      const me = G.rover.pos;
+      const rx = me.x + S.wrapDelta(x - me.x);
+      const rz = me.z + S.wrapDelta(z - me.z);
+
+      const gy = G.terrainHeight(rx, rz);   // heightfield is periodic — same ground either side
       const grounded = (this.flags & S.F.AIR) === 0;
       const renderY = grounded ? gy : Math.max(y, gy);
 
       const grp = this.rig.group;
-      grp.position.set(x, renderY, z);
+      grp.position.set(rx, renderY, rz);
 
       // chassis orientation
       if (grounded) {
-        G.terrainNormal(x, z, _n);
+        G.terrainNormal(rx, rz, _n);
         this.normal.lerp(_n, 1 - Math.exp(-8 * dt)).normalize();
       } else {
         this.normal.lerp(UP, 1 - Math.exp(-1.2 * dt)).normalize();
@@ -121,29 +131,30 @@
       const lights = (this.flags & S.F.LIGHTS) !== 0;
       if (lights !== this.lightsWere) { this.rig.setLights(lights); this.lightsWere = lights; }
 
-      // modest dust + faint track for remotes
+      // modest dust + faint track for remotes (at the rendered wrap image;
+      // trackStamp wraps marks back onto the canonical canvas itself)
       if (!dead && grounded) {
         this.emitter.vx = vx; this.emitter.vz = vz;
         this.emitter.vL = (this.flags & S.F.DRIFT) ? 2.5 : 0;
         this.emitter.grounded = true;
-        G.emitWheelDustFor(this.emitter, [{ x, y: gy, z }], dt, 0.45);
+        G.emitWheelDustFor(this.emitter, [{ x: rx, y: gy, z: rz }], dt, 0.45);
 
         const hs = Math.hypot(vx, vz);
         if (hs > 0.6) {
           if (this.trackPrev) {
-            const dx = x - this.trackPrev.x, dz = z - this.trackPrev.z;
+            const dx = rx - this.trackPrev.x, dz = rz - this.trackPrev.z;
             const d2 = dx * dx + dz * dz;
             if (d2 > 0.04 && d2 < 200) {
-              G.trackStamp(this.trackPrev.x, this.trackPrev.z, x, z, 0.13, 1.8);
-              this.trackPrev.x = x; this.trackPrev.z = z;
-            } else if (d2 >= 200) { this.trackPrev.x = x; this.trackPrev.z = z; }
-          } else this.trackPrev = { x, z };
+              G.trackStamp(this.trackPrev.x, this.trackPrev.z, rx, rz, 0.13, 1.8);
+              this.trackPrev.x = rx; this.trackPrev.z = rz;
+            } else if (d2 >= 200) { this.trackPrev.x = rx; this.trackPrev.z = rz; }
+          } else this.trackPrev = { x: rx, z: rz };
         }
       } else this.trackPrev = null;
 
       // smoke trail when badly damaged
       if (!dead && this.hp < 35 && Math.random() < dt * 14) {
-        G.spawnDust(x, renderY + 1.2, z,
+        G.spawnDust(rx, renderY + 1.2, rz,
           (Math.random() - 0.5) * 0.5, 1.3 + Math.random(), (Math.random() - 0.5) * 0.5,
           0.2 + Math.random() * 0.2, 1.6, 0.4, renderY - 1);
       }

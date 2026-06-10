@@ -89,6 +89,9 @@
   const _camDP = new THREE.Vector3(), _camDL = new THREE.Vector3();
   let shakeBudget = 0;
   G.addCamShake = (s) => { shakeBudget = Math.min(shakeBudget + s, 0.6); };
+  // world wrap: translate the smoothed camera with the rover so the view
+  // is continuous when crossing the seam
+  G.shiftCamera = (dx, dz) => { camPos.x += dx; camPos.z += dz; camLook.x += dx; camLook.z += dz; };
 
   function updateCamera(dt, now) {
     const rover = G.rover, camera = G.camera;

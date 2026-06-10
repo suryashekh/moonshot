@@ -241,14 +241,76 @@
     }
   }
 
-  /* ---------------- minimap ---------------- */
+  /* ---------------- minimap: rotating moon globe ----------------
+     The open world is shown as a sphere. World (x,z) maps to
+     longitude/latitude on the moon; the globe is drawn in an
+     orthographic projection centered on the vehicle, so it rotates
+     under you as you drive. Only the facing hemisphere is visible.  */
   const mm = document.getElementById('minimap');
   const mctx = mm ? mm.getContext('2d') : null;
   const MMS = mm ? mm.width : 376;   // canvas backing-store px
-  const SCALE = MMS / (S.WORLD.terrainSize + 40);
-  const K = MMS / 150;          // stroke/dot scale vs original 150px design
+  const K = MMS / 150;               // stroke/dot scale vs original 150px design
+  const GR = MMS / 2 - 5 * K;        // globe radius on canvas
+  const WRAP_L = S.WORLD.wrapHalf * 2;
 
-  function w2m(x, z) { return [MMS / 2 + x * SCALE, MMS / 2 + z * SCALE]; }
+  const lonOf = (x) => (x / WRAP_L) * S.TAU;
+  const latOf = (z) => (z / WRAP_L) * Math.PI;
+
+  // orthographic projection state (player-centered), updated per frame
+  let _cL0 = 1, _sL0 = 0, _cA0 = 1, _sA0 = 0;
+  function mmSetCenter(x, z) {
+    const lon0 = lonOf(S.wrapCoord(x)), lat0 = latOf(S.wrapCoord(z));
+    _cL0 = Math.cos(lon0); _sL0 = Math.sin(lon0);
+    _cA0 = Math.cos(lat0); _sA0 = Math.sin(lat0);
+  }
+  // world → screen [sx, sy] or null when on the far hemisphere
+  function mmProject(x, z) {
+    const lon = lonOf(S.wrapCoord(x)), lat = latOf(S.wrapCoord(z));
+    const cl = Math.cos(lat);
+    const vx = cl * Math.sin(lon), vy = Math.sin(lat), vz = cl * Math.cos(lon);
+    const x1 = vx * _cL0 - vz * _sL0;          // yaw the player's meridian to front
+    const z1 = vx * _sL0 + vz * _cL0;
+    const y2 = vy * _cA0 - z1 * _sA0;          // pitch the player's latitude to front
+    const z2 = vy * _sA0 + z1 * _cA0;
+    if (z2 < 0.04) return null;                // back of the moon
+    return [MMS / 2 + x1 * GR, MMS / 2 - y2 * GR, z2];
+  }
+  // polyline on the globe: starts a new path across hidden gaps
+  function mmPolyline(pts) {
+    let pen = false;
+    mctx.beginPath();
+    for (let i = 0; i < pts.length; i++) {
+      const p = mmProject(pts[i][0], pts[i][1]);
+      if (!p) { pen = false; continue; }
+      pen ? mctx.lineTo(p[0], p[1]) : mctx.moveTo(p[0], p[1]);
+      pen = true;
+    }
+    mctx.stroke();
+  }
+  function mmDot(x, z, r, style) {
+    const p = mmProject(x, z);
+    if (!p) return;
+    mctx.fillStyle = style;
+    mctx.beginPath(); mctx.arc(p[0], p[1], r * (0.6 + 0.4 * p[2]), 0, S.TAU); mctx.fill();
+  }
+
+  // static polylines: track ring + graticule (lat/lon grid for the globe feel)
+  const TRACK_PTS = [];
+  for (let i = 0; i <= 96; i++) {
+    const a = (i / 96) * S.TAU, r = S.trackRadius(a);
+    TRACK_PTS.push([Math.cos(a) * r, Math.sin(a) * r]);
+  }
+  const GRID_PTS = [];
+  for (let m = 0; m < 8; m++) {                       // meridians every 45°
+    const x = (m / 8) * WRAP_L - S.WORLD.wrapHalf, line = [];
+    for (let i = 0; i <= 40; i++) line.push([x, (i / 40) * WRAP_L - S.WORLD.wrapHalf]);
+    GRID_PTS.push(line);
+  }
+  for (let q = 1; q < 6; q++) {                       // parallels every 30°
+    const z = (q / 6) * WRAP_L - S.WORLD.wrapHalf, line = [];
+    for (let i = 0; i <= 56; i++) line.push([(i / 56) * WRAP_L - S.WORLD.wrapHalf, z]);
+    GRID_PTS.push(line);
+  }
 
   let mmLast = 0;
   function drawMinimap(now) {
@@ -256,60 +318,65 @@
     mmLast = now;
     mctx.clearRect(0, 0, MMS, MMS);
 
+    const me = G.rover;
+    mmSetCenter(me.pos.x, me.pos.z);
+
+    // moon disc with a soft terminator shade + rim
+    const cx = MMS / 2, cy = MMS / 2;
+    const sh = mctx.createRadialGradient(cx - GR * 0.35, cy - GR * 0.35, GR * 0.15, cx, cy, GR);
+    sh.addColorStop(0, 'rgba(64,70,78,0.92)');
+    sh.addColorStop(0.75, 'rgba(36,40,46,0.94)');
+    sh.addColorStop(1, 'rgba(18,20,24,0.96)');
+    mctx.fillStyle = sh;
+    mctx.beginPath(); mctx.arc(cx, cy, GR, 0, S.TAU); mctx.fill();
+    mctx.strokeStyle = 'rgba(170,190,210,0.35)';
+    mctx.lineWidth = 1 * K;
+    mctx.beginPath(); mctx.arc(cx, cy, GR, 0, S.TAU); mctx.stroke();
+
+    // graticule — makes the rotation readable
+    mctx.strokeStyle = 'rgba(140,160,180,0.16)';
+    mctx.lineWidth = 0.7 * K;
+    for (const line of GRID_PTS) mmPolyline(line);
+
     // track ring
-    mctx.strokeStyle = 'rgba(150,170,190,0.5)';
+    mctx.strokeStyle = 'rgba(150,170,190,0.55)';
     mctx.lineWidth = 1.4 * K;
-    mctx.beginPath();
-    for (let i = 0; i <= 72; i++) {
-      const a = (i / 72) * S.TAU;
-      const r = S.trackRadius(a);
-      const [px, py] = w2m(Math.cos(a) * r, Math.sin(a) * r);
-      i ? mctx.lineTo(px, py) : mctx.moveTo(px, py);
-    }
-    mctx.stroke();
+    mmPolyline(TRACK_PTS);
 
     // gates
     for (const g of GATES) {
-      const [px, py] = w2m(g.x, g.z);
-      mctx.fillStyle = g.i === G.state.nextGate ? '#35e0ff' : 'rgba(255,179,71,0.85)';
-      mctx.beginPath(); mctx.arc(px, py, (g.i === G.state.nextGate ? 3 : 2) * K, 0, S.TAU); mctx.fill();
+      mmDot(g.x, g.z, (g.i === G.state.nextGate ? 3 : 2) * K,
+        g.i === G.state.nextGate ? '#35e0ff' : 'rgba(255,179,71,0.85)');
     }
 
     // asteroid warnings
     if (G.asteroidWarnings) {
-      mctx.fillStyle = 'rgba(255,70,60,0.85)';
-      for (const a of G.asteroidWarnings()) {
-        const [px, py] = w2m(a.x, a.z);
-        mctx.beginPath(); mctx.arc(px, py, 2.6 * K, 0, S.TAU); mctx.fill();
-      }
+      for (const a of G.asteroidWarnings()) mmDot(a.x, a.z, 2.6 * K, 'rgba(255,70,60,0.85)');
     }
 
     // aliens (green blips)
     if (G.alienDots) {
-      mctx.fillStyle = 'rgba(61,255,154,0.9)';
-      for (const a of G.alienDots()) {
-        const [px, py] = w2m(a.x, a.z);
-        mctx.beginPath(); mctx.arc(px, py, 2.4 * K, 0, S.TAU); mctx.fill();
-      }
+      for (const a of G.alienDots()) mmDot(a.x, a.z, 2.4 * K, 'rgba(61,255,154,0.9)');
     }
 
     // remotes
     for (const r of G.remotes.values()) {
-      const [px, py] = w2m(r.x, r.z);
-      mctx.fillStyle = '#' + r.color.toString(16).padStart(6, '0');
-      mctx.beginPath(); mctx.arc(px, py, 2.6 * K, 0, S.TAU); mctx.fill();
+      mmDot(r.x, r.z, 2.6 * K, '#' + r.color.toString(16).padStart(6, '0'));
     }
 
-    // me (triangle pointing along heading)
-    const me = G.rover;
-    const [px, py] = w2m(me.pos.x, me.pos.z);
+    // me — always at the globe's center; arrow points along heading.
+    // At the projection center, world +x (east) is screen-right and world +z
+    // (north) is screen-up; forward = (sin h, cos h), so a canvas rotation of
+    // exactly `heading` applied to an up-pointing arrow renders it correctly.
     mctx.save();
-    mctx.translate(px, py);
-    mctx.rotate(Math.atan2(Math.sin(me.heading), Math.cos(me.heading)));
+    mctx.translate(cx, cy);
+    mctx.rotate(me.heading);
     mctx.fillStyle = '#ffffff';
+    mctx.strokeStyle = 'rgba(0,0,0,0.55)';
+    mctx.lineWidth = 1 * K;
     mctx.beginPath();
-    mctx.moveTo(4.2 * K, 0); mctx.lineTo(-3 * K, 2.6 * K); mctx.lineTo(-3 * K, -2.6 * K);
-    mctx.closePath(); mctx.fill();
+    mctx.moveTo(0, -4.6 * K); mctx.lineTo(3 * K, 3.2 * K); mctx.lineTo(-3 * K, 3.2 * K);
+    mctx.closePath(); mctx.fill(); mctx.stroke();
     mctx.restore();
   }
 

@@ -18,7 +18,22 @@
     terrainSize: 700,
     gravity: 1.62,
     laps: 3,
+    // open world: driving past ±wrapHalf comes out the opposite side (a
+    // "whole moon" you can circumnavigate). The terrain mesh runs 10 units
+    // past the wrap line as a guard band that previews the far side, so the
+    // seam is invisible. Period of the world torus = 2 * wrapHalf.
+    wrapHalf: 340,
   };
+  const WRAP_PERIOD = WORLD.wrapHalf * 2;
+
+  // canonical coordinate in [-wrapHalf, wrapHalf)
+  function wrapCoord(v) {
+    return v - Math.floor((v + WORLD.wrapHalf) / WRAP_PERIOD) * WRAP_PERIOD;
+  }
+  // shortest signed delta between two coordinates on the wrap circle
+  function wrapDelta(d) {
+    return d - Math.round(d / WRAP_PERIOD) * WRAP_PERIOD;
+  }
 
   /* ---------- track ring --------------------------------------
      Radius of the racing line as a function of angle. Pure math:
@@ -270,7 +285,7 @@
   }
 
   return {
-    TAU, WORLD, trackRadius, GATE_COUNT, gatePositions, gateRadius,
+    TAU, WORLD, wrapCoord, wrapDelta, trackRadius, GATE_COUNT, gatePositions, gateRadius,
     CRATES, CRATE_RESPAWN_MS, CRATE_PICK_R, MAX_ITEMS,
     ITEMS, rollItem, DMG, COMBAT, GUN, TURBO, ALIEN, ZONES, JUMP_PADS, RAMPS, STUNT, zoneAt,
     NET, PLAYER_COLORS, F, mulberry32,

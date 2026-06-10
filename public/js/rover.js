@@ -628,10 +628,19 @@
       }
     }
 
-    // --- Soft world boundary
-    const B = HALF - 14;
-    if (Math.abs(rover.pos.x) > B) { rover.pos.x = clamp(rover.pos.x, -B, B); rover.vel.x *= -0.25; }
-    if (Math.abs(rover.pos.z) > B) { rover.pos.z = clamp(rover.pos.z, -B, B); rover.vel.z *= -0.25; }
+    // --- Open world: wrap across the seam (drive around the whole moon).
+    // Terrain height is periodic over ±wrapHalf, so y/velocity carry over
+    // unchanged; the camera is shifted by the same delta so the view never jumps.
+    {
+      const W = S.WORLD.wrapHalf;
+      let wdx = 0, wdz = 0;
+      if (rover.pos.x >= W) wdx = -2 * W; else if (rover.pos.x < -W) wdx = 2 * W;
+      if (rover.pos.z >= W) wdz = -2 * W; else if (rover.pos.z < -W) wdz = 2 * W;
+      if (wdx || wdz) {
+        rover.pos.x += wdx; rover.pos.z += wdz;
+        if (G.shiftCamera) G.shiftCamera(wdx, wdz);
+      }
+    }
 
     rover.odo += hSpeed * dt;
 
