@@ -84,6 +84,31 @@
     G.gun.rechargeAt = 0;
   };
 
+  /* ---------------- turbo (same model as the blaster) ---------------- */
+  G.turbo = { charges: S.TURBO.charges, rechargeAt: 0, lastUse: 0 };
+  G.fireTurbo = function () {
+    const st = G.state, now = performance.now();
+    if (st.phase !== 'race' || st.controlsLocked || st.finished) return;
+    if (now - G.turbo.lastUse < S.TURBO.useGapMs - 30) return;
+    if (G.turbo.charges <= 0 && G.serverNow() < G.turbo.rechargeAt) {
+      G.beep(160, 60, 'square', 0.03);   // dry click
+      return;
+    }
+    G.turbo.lastUse = now;
+    G.net.send({ t: 'turbo' });
+  };
+  G.onTurboAmmo = function (m) {
+    G.turbo.charges = m.charges;
+    if (m.rechargeAt) {
+      G.turbo.rechargeAt = m.rechargeAt;
+      G.beep(260, 180, 'sine', 0.05);    // tank empty
+    }
+  };
+  G.resetTurbo = function () {
+    G.turbo.charges = S.TURBO.charges;
+    G.turbo.rechargeAt = 0;
+  };
+
   G.onRocketBoom = function (m) {
     const r = rockets.get(m.id);
     if (r) { G.scene.remove(r.mesh); rockets.delete(m.id); }

@@ -32,6 +32,7 @@ Port defaults to `3000`; override with `PORT=8080 node server/server.js`.
 | Space | Handbrake drift |
 | **Shift** | Fire selected weapon |
 | **F** | Fire pulse blaster (6 shots, then recharge gap) |
+| **E** | Turbo burst (3 charges, then recharge gap) |
 | **Q / mouse wheel** | Swap selected weapon slot |
 | **1–5** | Select weapon slot directly |
 | Tab (hold) | Scoreboard |
@@ -46,7 +47,8 @@ Touch controls (steer / throttle / brake / drift / item) appear automatically on
 - **Asteroids**: most rocks *hunt a racer* — the server leads your velocity to the impact point, with a little scatter so a hard swerve saves you. Warning circles (yellow → red) mark impacts; a rock locked on YOU pulses red immediately and triggers a "⚠ ASTEROID LOCK" alert. Direct hit = destroyed → respawn at your last gate; near miss = knockback + damage. Frequency ramps with the leader's lap; lap 3 brings meteor showers and reduced visibility.
 - **Car contact**: rovers collide for real — push, bounce, spin. Hard contact deals ram damage; do it while boosting for a heavier shove.
 - **Pulse blaster**: everyone carries one (F / ⌖ on mobile). 6-shot magazine, then a forced 3.5 s recharge gap — ammo pips live in the HUD. Bolts chip opponents (shields soak them) and are the bread-and-butter way to kill aliens.
-- **Aliens**: humanoid hostiles (glowing green heads, rifles) drop in right ahead of racers, sprint after the nearest rover, fire dodgeable green bolts from range and claw-swipe up close. Kill one (blaster or any rocket) for a bounty item. Green blips on the minimap.
+- **Turbo**: everyone also has a built-in turbo (E / »» on mobile) on the same magazine model — 3 charges, each a 1.7 s speed burst, then a 7 s recharge gap. Amber pips under the blaster bar.
+- **Aliens**: a rare event — at most one roams at a time, half a minute or more apart. Humanoid hostiles (glowing green heads, rifles) drop in ahead of a racer, chase at 11 m/s (outrunnable), fire dodgeable green bolts from range and claw-swipe up close. Kill one with the blaster/rockets — or just run it over at speed — for a bounty item. Green blips on the minimap.
 - **Map + standings**: the minimap (top right) shows the track, gates, players, aliens and incoming asteroids; a live standings list inside the same panel shows everyone's rank and lap at all times, with the killfeed below.
 - **Crate signs**: every pod advertises its content — the item's icon and name float above it, tinted by tier (cyan common / green uncommon / pink rare / gold legendary) — so you pick your line through the crates you actually want.
 - **Hazards**: solar flares (HUD glitch + whiteout), moonquakes (steering noise + shake), dust storms (fog), slip/rough zones, low-gravity jump pads.

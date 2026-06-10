@@ -166,11 +166,19 @@
     speed: 70, lifeMs: 1100, hitR: 2.6, dmg: 8,
   };
 
+  /* ---------- turbo (everyone; same magazine+recharge model) ---- */
+  const TURBO = {
+    charges: 3,          // magazine
+    useGapMs: 600,       // min ms between burns
+    rechargeMs: 7000,    // empty → full again (the "gap")
+    burstMs: 1700,       // speed burst per charge
+  };
+
   /* ---------- aliens (humanoid hostiles) ------------------------ */
   const ALIEN = {
-    maxAlive: 3,
-    spawnMsMin: 10000, spawnMsMax: 18000,
-    lifeMs: 45000,       // gives up and leaves after this
+    maxAlive: 1,                          // a rare event, not a horde
+    spawnMsMin: 28000, spawnMsMax: 50000,
+    lifeMs: 40000,       // gives up and leaves after this
     hp: 30,
     speed: 11,           // chases, but a healthy rover can outrun it
     aggroR: 120,         // hunts the nearest racer inside this
@@ -230,7 +238,7 @@
   return {
     TAU, WORLD, trackRadius, GATE_COUNT, gatePositions, gateRadius,
     CRATES, CRATE_RESPAWN_MS, CRATE_PICK_R, MAX_ITEMS,
-    ITEMS, rollItem, DMG, COMBAT, GUN, ALIEN, ZONES, JUMP_PADS, zoneAt,
+    ITEMS, rollItem, DMG, COMBAT, GUN, TURBO, ALIEN, ZONES, JUMP_PADS, zoneAt,
     NET, PLAYER_COLORS, F, mulberry32,
   };
 });

@@ -27,6 +27,8 @@ async function until(fn, ms, what){ const t0=Date.now(); while(Date.now()-t0<ms)
       if (m.t==='rocket' && m.kind==='blast' && m.owner===c.id) c.blasts++;
       if (m.t==='rocket' && m.kind==='abolt') c.abolts = (c.abolts||0) + 1;
       if (m.t==='ammo') c.ammoMsgs.push(m);
+      if (m.t==='turboAmmo') c.turboMsgs = (c.turboMsgs||[]).concat(m);
+      if (m.t==='fx' && m.kind==='boost' && m.id===c.id) c.boosts = (c.boosts||0)+1;
       if (m.t==='alienSpawn') c.aliens++;
       if (m.t==='alienZap') c.zaps++;
       if (m.t==='damage' && m.id===c.id && m.kind==='alien') c.alienDmg++;
@@ -76,6 +78,16 @@ async function until(fn, ms, what){ const t0=Date.now(); while(Date.now()-t0<ms)
   if (!empty) throw new Error('no empty-mag recharge ack received');
   if (a.blasts > S.GUN.shots) throw new Error(`fired ${a.blasts} > magazine ${S.GUN.shots} — recharge gap not enforced`);
   console.log('✓ blaster:', a.blasts, 'bolts then forced recharge gap (ack rechargeAt set)');
+
+  // 4b) turbo: burn all charges, expect boost fx + recharge-gap enforcement
+  const boostsBefore = b.boosts || 0;
+  for (let i = 0; i < S.TURBO.charges + 2; i++) { b.send({t:'turbo'}); await sleep(S.TURBO.useGapMs + 50); }
+  await until(()=>(b.boosts||0) - boostsBefore >= S.TURBO.charges, 4000, 'turbo boosts broadcast');
+  const tEmpty = (b.turboMsgs||[]).find(m => m.charges === 0 && m.rechargeAt > 0);
+  if (!tEmpty) throw new Error('no empty-tank turbo recharge ack');
+  if ((b.boosts||0) - boostsBefore > S.TURBO.charges)
+    throw new Error('turbo fired more than its magazine — recharge gap not enforced');
+  console.log('✓ turbo:', S.TURBO.charges, 'charges then forced recharge gap');
 
   // 5) humanoid aliens spawn, open fire (abolt) or claw, and damage lands
   await until(()=>a.aliens >= 1, 40000, 'alien spawn');

@@ -226,6 +226,7 @@
     if (e.code === 'KeyL') { rig.setLights(!rig.lightsOn); }
     if (e.code === 'KeyQ') { if (G.cycleItem) G.cycleItem(1); }
     if (e.code === 'KeyF') { if (G.fireGun) G.fireGun(); e.preventDefault(); }
+    if (e.code === 'KeyE') { if (G.fireTurbo) G.fireTurbo(); e.preventDefault(); }
     if (/^Digit[1-5]$/.test(e.code)) {
       if (G.selectItem) G.selectItem(+e.code.slice(-1) - 1);
     }
@@ -252,6 +253,7 @@
       if (!k) {   // non-movement buttons: item / cycle / blaster
         const fn = btn.id === 't-cycle' ? () => { if (G.cycleItem) G.cycleItem(1); }
           : btn.id === 't-gun' ? () => { if (G.fireGun) G.fireGun(); }
+          : btn.id === 't-turbo' ? () => { if (G.fireTurbo) G.fireTurbo(); }
           : () => { if (G.useItem) G.useItem(); };
         btn.addEventListener('pointerdown', (e) => { fn(); e.preventDefault(); });
         return;

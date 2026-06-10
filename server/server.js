@@ -148,6 +148,7 @@ class Room {
       // combat
       hp: S.DMG.maxHp, items: [], useCooldownUntil: 0,
       gunShots: S.GUN.shots, gunRechargeAt: 0, lastGunAt: 0,
+      turboCharges: S.TURBO.charges, turboRechargeAt: 0, lastTurboAt: 0,
       shieldUntil: 0, empUntil: 0, boostUntil: 0, gstabUntil: 0, decoyUntil: 0,
       deadUntil: 0, invulnUntil: 0, lastRamAt: 0, lastOuchAt: 0,
       disconnectedAt: 0,
@@ -180,6 +181,7 @@ class Room {
       p.lap = 1; p.nextGate = 0; p.gatesPassed = 0; p.bestLap = 0;
       p.finished = false; p.totalMs = 0; p.hp = S.DMG.maxHp; p.items.length = 0;
       p.gunShots = S.GUN.shots; p.gunRechargeAt = 0; p.lastGunAt = 0;
+      p.turboCharges = S.TURBO.charges; p.turboRechargeAt = 0; p.lastTurboAt = 0;
       p.shieldUntil = p.empUntil = p.boostUntil = p.gstabUntil = p.decoyUntil = 0;
       p.deadUntil = 0; p.invulnUntil = 0; p.startIdx = i++;
     }
@@ -204,7 +206,7 @@ class Room {
         this.nextAsteroidAt = t0 + 8000;
         this.nextShowerAt = 0;
         this.nextHazardAt = t0 + 20000;
-        this.nextAlienAt = t0 + 13000;
+        this.nextAlienAt = t0 + 25000;
         this.broadcast({ t: 'go', ts: t0 });
       }
     };
@@ -529,6 +531,23 @@ class Room {
     this.projectiles.push(r);
     this.broadcast({ t: 'rocket', id: r.id, kind: 'blast', owner: p.id, x: r.x, z: r.z, yaw: r.yaw, speed: r.speed });
     send(p.ws, { t: 'ammo', shots: p.gunShots, rechargeAt: p.gunShots <= 0 ? p.gunRechargeAt : 0 });
+  }
+
+  /* ----- turbo (same magazine + recharge-gap model as the blaster) ----- */
+  fireTurbo(p) {
+    const t = now();
+    if (this.state !== 'race' || p.finished || p.deadUntil > t) return;
+    if (t - p.lastTurboAt < S.TURBO.useGapMs) return;
+    if (p.turboCharges <= 0) {
+      if (t >= p.turboRechargeAt) p.turboCharges = S.TURBO.charges;   // recharged
+      else return;                                                    // still in the gap
+    }
+    p.lastTurboAt = t;
+    p.turboCharges--;
+    if (p.turboCharges <= 0) p.turboRechargeAt = t + S.TURBO.rechargeMs;
+    p.boostUntil = t + S.TURBO.burstMs;
+    this.broadcast({ t: 'fx', kind: 'boost', id: p.id, until: p.boostUntil });
+    send(p.ws, { t: 'turboAmmo', charges: p.turboCharges, rechargeAt: p.turboCharges <= 0 ? p.turboRechargeAt : 0 });
   }
 
   /* ----- aliens (humanoid hostiles) ----- */
@@ -970,6 +989,7 @@ wss.on('connection', (ws) => {
       }
       case 'use': if (room && player) room.useItem(player, m.slot); break;
       case 'gun': if (room && player) room.fireGun(player); break;
+      case 'turbo': if (room && player) room.fireTurbo(player); break;
       case 'ouch': {
         // client-reported environmental damage, clamped + rate-limited
         if (!room || !player || room.state !== 'race') return;
