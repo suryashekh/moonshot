@@ -62,39 +62,74 @@
   })();
 
   /* ---------------- launch ramps + overdrive strips ---------------- */
+  // proper wedge ramp (custom geometry, like a skate ramp): low open
+  // entry edge facing oncoming traffic, deck rising to the launch lip,
+  // solid side walls, open at the top — the opening IS the direction.
+  function makeRampGeometry(w, len, h) {
+    const hw = w / 2, hl = len / 2;
+    // entry edge at -Z (ground level), launch lip at +Z (height h)
+    const tris = [
+      // deck (slightly above ground so it doesn't z-fight)
+      [-hw, 0.06, -hl], [hw, 0.06, -hl], [hw, h, hl],
+      [-hw, 0.06, -hl], [hw, h, hl], [-hw, h, hl],
+      // right side wall (solid wedge face)
+      [hw, 0, -hl], [hw, 0, hl], [hw, h, hl],
+      // left side wall
+      [-hw, 0, -hl], [-hw, h, hl], [-hw, 0, hl],
+      // back face under the lip
+      [hw, 0, hl], [-hw, 0, hl], [-hw, h, hl],
+      [hw, 0, hl], [-hw, h, hl], [hw, h, hl],
+    ];
+    const pos = new Float32Array(tris.length * 3);
+    tris.forEach((v, i) => pos.set(v, i * 3));
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.computeVertexNormals();
+    return geo;
+  }
+
   const speedQuads = [];
   (function buildTrackFurniture() {
-    // ramps: amber wedge sitting on the racing line, pointing along travel
     for (const rp of S.RAMPS) {
       const grp = new THREE.Group();
       const gy = G.terrainHeight(rp.x, rp.z);
       grp.position.set(rp.x, gy, rp.z);
       grp.rotation.y = rp.heading;
 
-      const deck = new THREE.Mesh(
-        new THREE.BoxGeometry(8.5, 0.35, 7),
-        new THREE.MeshStandardMaterial({ color: 0x3c4754, metalness: 0.7, roughness: 0.4 })
+      const wedge = new THREE.Mesh(
+        makeRampGeometry(rp.w, rp.len, rp.h),
+        new THREE.MeshStandardMaterial({
+          color: 0x4a5562, metalness: 0.65, roughness: 0.45, side: THREE.DoubleSide,
+        })
       );
-      deck.rotation.x = -0.33;            // inclined into the direction of travel
-      deck.position.set(0, 1.0, 0);
-      deck.castShadow = true; deck.receiveShadow = true;
-      grp.add(deck);
+      wedge.castShadow = true; wedge.receiveShadow = true;
+      grp.add(wedge);
 
-      for (const sx of [-4.0, 4.0]) {     // glowing edge rails
-        const rail = new THREE.Mesh(
-          new THREE.BoxGeometry(0.3, 0.12, 7),
-          new THREE.MeshBasicMaterial({ color: 0xffb347 })
+      // channel walls above the deck (the slide rails in the reference)
+      const slope = Math.atan2(rp.h, rp.len);
+      for (const sx of [-(rp.w / 2 - 0.14), rp.w / 2 - 0.14]) {
+        const wall = new THREE.Mesh(
+          new THREE.BoxGeometry(0.25, 1.0, rp.len * 1.02),
+          new THREE.MeshStandardMaterial({ color: 0x39424d, metalness: 0.6, roughness: 0.5 })
         );
-        rail.rotation.x = -0.33;
-        rail.position.set(sx, 1.22, 0);
-        grp.add(rail);
+        wall.rotation.x = -slope;
+        wall.position.set(sx, rp.h / 2 + 0.5, 0);
+        wall.castShadow = true;
+        grp.add(wall);
       }
+      // glowing launch lip across the top edge
+      const lip = new THREE.Mesh(
+        new THREE.BoxGeometry(rp.w, 0.14, 0.3),
+        new THREE.MeshBasicMaterial({ color: 0xffb347 })
+      );
+      lip.position.set(0, rp.h + 0.05, rp.len / 2 - 0.15);
+      grp.add(lip);
       const glow = new THREE.Sprite(new THREE.SpriteMaterial({
         map: G.glowTex, color: 0xffb347, transparent: true,
-        blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.5,
+        blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.45,
       }));
-      glow.scale.setScalar(7);
-      glow.position.y = 2.2;
+      glow.scale.setScalar(6);
+      glow.position.set(0, rp.h + 1.2, rp.len / 2 - 0.5);
       grp.add(glow);
       G.scene.add(grp);
     }
