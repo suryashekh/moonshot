@@ -28,10 +28,11 @@
   let _modelFailed = false;
   const _pendingRigs = [];        // rigs built before the model finished loading
 
-  // The GLB packs all four wheels into a few full-width meshes (one per part:
-  // tyre/rim/hub). Split that geometry into 4 corner buckets by vertex sign, and
-  // re-home each as steer-pivot ▸ spin ▸ mesh so wheels can roll and the front
-  // pair can steer — exactly like the old procedural rig. Runs once on the proto.
+  // buggy2.glb keeps the four mud-guards as their own `mud_guard` mesh (still on
+  // the Wheels material), separate from the tyre/rim/hub meshes. Split everything by
+  // corner; per corner the tyre/rim go on a spin group (rolls) while the mud-guard
+  // goes on the steer group — it turns left-right with the front wheels but never
+  // rolls. Runs once on the shared prototype.
   function splitWheels(root) {
     root.updateMatrixWorld(true);
     const rootInv = new THREE.Matrix4().copy(root.matrixWorld).invert();
@@ -40,13 +41,15 @@
       if (o.isMesh && o.material && o.material.name === WHEEL_MAT_NAME) wheelMeshes.push(o);
     });
     if (!wheelMeshes.length) { console.warn('[rover] no "' + WHEEL_MAT_NAME + '" meshes — wheels won\'t turn'); return; }
-
     const wheelMat = wheelMeshes[0].material;
-    const buckets = {};   // key 'F|B' + 'P|N' -> {pos:[], nrm:[], uv:[]}
+    const isGuard = (o) => { for (let p = o; p; p = p.parent) if (p.name && p.name.toLowerCase().indexOf('mud_guard') >= 0) return true; return false; };
+
+    const buckets = {};   // key 'F|B'+'P|N' -> { spin:{pos,nrm,uv}, guard:{pos,nrm,uv} }
     const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3();
-    const nrmMat = new THREE.Matrix3();
+    const nrmMat = new THREE.Matrix3(), nv = new THREE.Vector3();
 
     for (const mesh of wheelMeshes) {
+      const guard = isGuard(mesh);
       const Mlocal = new THREE.Matrix4().multiplyMatrices(rootInv, mesh.matrixWorld);
       nrmMat.getNormalMatrix(Mlocal);
       const geo = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry;
@@ -57,38 +60,44 @@
         vC.fromBufferAttribute(pos, t + 2).applyMatrix4(Mlocal);
         const cx = (vA.x + vB.x + vC.x) / 3, cz = (vA.z + vB.z + vC.z) / 3;
         const key = (cx >= 0 ? 'F' : 'B') + (cz >= 0 ? 'P' : 'N');
-        const b = buckets[key] || (buckets[key] = { pos: [], nrm: [], uv: [] });
+        const b = buckets[key] || (buckets[key] = { spin: { pos: [], nrm: [], uv: [] }, guard: { pos: [], nrm: [], uv: [] } });
+        const d = guard ? b.guard : b.spin;
         for (let v = 0; v < 3; v++) {
           const src = v === 0 ? vA : (v === 1 ? vB : vC);
-          b.pos.push(src.x, src.y, src.z);
-          const nx = nrm.getX(t + v), ny = nrm.getY(t + v), nz = nrm.getZ(t + v);
-          const n = new THREE.Vector3(nx, ny, nz).applyMatrix3(nrmMat).normalize();
-          b.nrm.push(n.x, n.y, n.z);
-          if (uv) b.uv.push(uv.getX(t + v), uv.getY(t + v));
+          d.pos.push(src.x, src.y, src.z);
+          nv.set(nrm.getX(t + v), nrm.getY(t + v), nrm.getZ(t + v)).applyMatrix3(nrmMat).normalize();
+          d.nrm.push(nv.x, nv.y, nv.z);
+          if (uv) d.uv.push(uv.getX(t + v), uv.getY(t + v));
         }
       }
     }
     for (const mesh of wheelMeshes) mesh.parent && mesh.parent.remove(mesh);
 
-    // Build one centered wheel mesh per corner under a steer▸spin pivot at its hub.
+    // Per corner: steer pivot at the tyre's hub; tyre/rim on spin, mud-guard on steer.
     for (const key of Object.keys(buckets)) {
       const b = buckets[key];
+      const ref = b.spin.pos.length ? b.spin.pos : b.guard.pos;   // axle centre from the tyre
       const bb = new THREE.Box3();
-      for (let i = 0; i < b.pos.length; i += 3) bb.expandByPoint(vA.set(b.pos[i], b.pos[i + 1], b.pos[i + 2]));
+      for (let i = 0; i < ref.length; i += 3) bb.expandByPoint(vA.set(ref[i], ref[i + 1], ref[i + 2]));
       const c = new THREE.Vector3(); bb.getCenter(c);
-      const posArr = new Float32Array(b.pos);
-      for (let i = 0; i < posArr.length; i += 3) { posArr[i] -= c.x; posArr[i + 1] -= c.y; posArr[i + 2] -= c.z; }
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
-      g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(b.nrm), 3));
-      if (b.uv.length) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(b.uv), 2));
 
       const steer = new THREE.Group(); steer.name = 'wheelSteer'; steer.position.copy(c);
       const spin = new THREE.Group(); spin.name = 'wheelSpin'; steer.add(spin);
-      const wm = new THREE.Mesh(g, wheelMat); wm.castShadow = true; wm.receiveShadow = true;
-      spin.add(wm);
+      if (b.spin.pos.length) spin.add(makeWheelMesh(b.spin, c, wheelMat));    // rolls
+      if (b.guard.pos.length) steer.add(makeWheelMesh(b.guard, c, wheelMat)); // steers only, no roll
       root.add(steer);
     }
+  }
+
+  function makeWheelMesh(soup, center, mat) {
+    const posArr = new Float32Array(soup.pos);
+    for (let i = 0; i < posArr.length; i += 3) { posArr[i] -= center.x; posArr[i + 1] -= center.y; posArr[i + 2] -= center.z; }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(soup.nrm), 3));
+    if (soup.uv.length) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(soup.uv), 2));
+    const m = new THREE.Mesh(g, mat); m.castShadow = true; m.receiveShadow = true;
+    return m;
   }
 
   // Center horizontally, rest the base on y=0, scale to MODEL_TARGET_LEN, face +Z.
