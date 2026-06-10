@@ -177,8 +177,8 @@
   /* ---------- aliens (humanoid hostiles) ------------------------ */
   const ALIEN = {
     maxAlive: 1,                          // a rare event, not a horde
-    spawnMsMin: 28000, spawnMsMax: 50000,
-    lifeMs: 40000,       // gives up and leaves after this
+    spawnMsMin: 50000, spawnMsMax: 90000,
+    lifeMs: 30000,       // gives up and leaves after this
     hp: 30,
     speed: 11,           // chases, but a healthy rover can outrun it
     aggroR: 120,         // hunts the nearest racer inside this
@@ -227,9 +227,10 @@
      your velocity, with a small body tilt — no tumbling). Banked yaw
      spin pays out a boost on landing.                               */
   const STUNT = {
-    spinRate: 0.6,    // rad/s yaw from steering while airborne (barely-there)
-    airCtrl: 2.2,     // m/s² horizontal nudge from throttle in air
-    tiltMax: 0.12,    // max visual pitch tilt from air control (rad)
+    spinRate: 0.45,   // rad/s yaw in air: one full turn needs a BIG ramp jump
+    spinDelayS: 0.4,  // no spin at all until this long airborne (kills hop-twitch)
+    airCtrl: 1.2,     // m/s² horizontal nudge from throttle in air
+    tiltMax: 0.06,    // max visual pitch tilt from air control (rad)
     tiltRate: 2.2,    // how fast the tilt eases toward its target
     minAirS: 0.6,     // must be airborne at least this long
     minTrick: 1.0,    // banked spin radians to count as a stunt

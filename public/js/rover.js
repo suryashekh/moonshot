@@ -370,7 +370,7 @@
       const dir = rover.vF >= -0.2 ? 1 : -1;
       const speedFac = clamp(hSpeed / 3.5, 0, 1) / (1 + hSpeed * 0.035);
       rover.heading += rover.steer * CFG.steerRate * speedFac * dir * dt;
-    } else if (rover.airTime > 0.2 && !locked) {
+    } else if (rover.airTime > S.STUNT.spinDelayS && !locked) {
       // airborne: steering = gentle yaw (banks stunt credit),
       // throttle = AIR CONTROL — nudges velocity, small body tilt only
       const spin = rover.steer * S.STUNT.spinRate * dt;
