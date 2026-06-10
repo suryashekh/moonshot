@@ -1,0 +1,316 @@
+/* ================================================================
+   TERRAIN — analytic heightfield, regolith texture, tire-track
+   canvas, rocks, horizon ring. Ported from the base simulator;
+   the only changes are:
+     * trackStamp()/paintScorch() so remote rovers and asteroid
+       impacts can mark the surface too,
+     * boulderColliders exposed on G for physics + combat.
+   terrainHeight is deterministic, so every client computes an
+   identical Moon — the server never needs the geometry.
+   ================================================================ */
+(function () {
+  const CFG = G.CFG, HALF = G.HALF, clamp = G.clamp;
+  const scene = G.scene, renderer = G.renderer;
+
+  /* ---- craters ---- */
+  const CRATERS = (function generateCraters() {
+    const rng = G.mulberry32(20260610);
+    const list = [];
+    while (list.length < 26) {
+      const x = (rng() * 2 - 1) * (HALF - 50);
+      const z = (rng() * 2 - 1) * (HALF - 50);
+      if (Math.hypot(x, z) < 55) continue;
+      const r = 12 + rng() * rng() * 46;
+      const depth = Math.min(r * (0.12 + rng() * 0.08), 7.0);
+      list.push({ x, z, r, depth, r2max: (r * 1.45) * (r * 1.45) });
+    }
+    return list;
+  })();
+
+  function craterShape(t, depth) {
+    let h = 0;
+    if (t < 1) { const q = 1 - t * t; h -= q * q * depth; }
+    const g = (t - 1.0) / 0.24;
+    h += Math.exp(-g * g) * depth * 0.30;
+    return h;
+  }
+
+  function terrainHeight(x, z) {
+    let h = (G.fbm2(x * 0.0042, z * 0.0042, 4) - 0.5) * 13.0;
+    h += (G.fbm2(x * 0.021 + 7.7, z * 0.021 - 3.3, 3) - 0.5) * 2.4;
+    const rr = G.fbm2(x * 0.0085 + 51.2, z * 0.0085 + 27.9, 3);
+    h += Math.pow(1.0 - Math.abs(rr * 2 - 1), 3.0) * 2.2 - 0.9;
+    h += (G.fbm2(x * 0.13 + 19.1, z * 0.13 + 5.6, 2) - 0.5) * 0.5;
+    for (let i = 0; i < CRATERS.length; i++) {
+      const c = CRATERS[i];
+      const dx = x - c.x, dz = z - c.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > c.r2max) continue;
+      h += craterShape(Math.sqrt(d2) / c.r, c.depth);
+    }
+    return h;
+  }
+  function terrainNormal(x, z, out) {
+    const e = 0.55;
+    const hL = terrainHeight(x - e, z), hR = terrainHeight(x + e, z);
+    const hD = terrainHeight(x, z - e), hU = terrainHeight(x, z + e);
+    return out.set(hL - hR, 2 * e, hD - hU).normalize();
+  }
+
+  /* ---- regolith albedo texture ---- */
+  function buildRegolithTexture() {
+    const S = 1024;
+    const c = document.createElement('canvas'); c.width = c.height = S;
+    const g = c.getContext('2d');
+    const img = g.createImageData(S, S);
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        let v = 0.56
+          + (G.vnoise2(x * 0.045, y * 0.045) - 0.5) * 0.17
+          + (G.vnoise2(x * 0.011 + 31, y * 0.011 + 31) - 0.5) * 0.10
+          + (G.hash2(x, y) - 0.5) * 0.105;
+        v = clamp(v, 0, 1) * 255;
+        const k = (y * S + x) * 4;
+        img.data[k] = v; img.data[k + 1] = v * 0.985; img.data[k + 2] = v * 0.955;
+        img.data[k + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+    const rng = G.mulberry32(777);
+    for (let i = 0; i < 1600; i++) {
+      const x = rng() * S, y = rng() * S, r = 1 + rng() * rng() * 7;
+      g.fillStyle = 'rgba(0,0,0,' + (0.10 + rng() * 0.18).toFixed(2) + ')';
+      g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+      g.fillStyle = 'rgba(255,250,240,' + (0.05 + rng() * 0.12).toFixed(2) + ')';
+      g.beginPath(); g.arc(x - r * 0.4, y - r * 0.4, r * 0.55, 0, Math.PI * 2); g.fill();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(26, 26);
+    tex.encoding = THREE.sRGBEncoding;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    return tex;
+  }
+
+  /* ---- tire tracks / surface scarring canvas ---- */
+  const TRACK_RES = 2048;
+  const trackCanvas = document.createElement('canvas');
+  trackCanvas.width = trackCanvas.height = TRACK_RES;
+  const trackCtx = trackCanvas.getContext('2d');
+  trackCtx.fillStyle = '#ffffff';
+  trackCtx.fillRect(0, 0, TRACK_RES, TRACK_RES);
+  trackCtx.lineCap = 'round';
+
+  const trackTexture = new THREE.CanvasTexture(trackCanvas);
+  trackTexture.flipY = false;
+  trackTexture.generateMipmaps = false;
+  trackTexture.minFilter = THREE.LinearFilter;
+  trackTexture.magFilter = THREE.LinearFilter;
+
+  let trackDirty = false;
+  let lastTrackUpload = 0;
+  const PX_PER_M = TRACK_RES / CFG.terrainSize;
+  const toPx = (w) => (w / CFG.terrainSize + 0.5) * TRACK_RES;
+
+  // generic line stamp in world coordinates (used by local + remote wheels)
+  function trackStamp(x0, z0, x1, z1, alpha, width) {
+    trackCtx.strokeStyle = 'rgba(18,16,14,' + alpha.toFixed(2) + ')';
+    trackCtx.lineWidth = width;
+    trackCtx.beginPath();
+    trackCtx.moveTo(toPx(x0), toPx(z0));
+    trackCtx.lineTo(toPx(x1), toPx(z1));
+    trackCtx.stroke();
+    trackDirty = true;
+  }
+  // radial scorch decal (asteroid / rocket impacts → "temporary crater" look)
+  function paintScorch(x, z, r, strength) {
+    const px = toPx(x), py = toPx(z), pr = r * PX_PER_M;
+    const grad = trackCtx.createRadialGradient(px, py, 0, px, py, pr);
+    grad.addColorStop(0, 'rgba(8,7,6,' + (strength || 0.8) + ')');
+    grad.addColorStop(0.55, 'rgba(14,12,10,' + ((strength || 0.8) * 0.5).toFixed(2) + ')');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    trackCtx.fillStyle = grad;
+    trackCtx.beginPath(); trackCtx.arc(px, py, pr, 0, Math.PI * 2); trackCtx.fill();
+    trackDirty = true;
+  }
+  // soft tint patch (hazard zones get painted once at boot)
+  function paintPatch(x, z, r, rgba) {
+    const px = toPx(x), py = toPx(z), pr = r * PX_PER_M;
+    const grad = trackCtx.createRadialGradient(px, py, 0, px, py, pr);
+    grad.addColorStop(0, rgba); grad.addColorStop(1, 'rgba(0,0,0,0)');
+    trackCtx.fillStyle = grad;
+    trackCtx.beginPath(); trackCtx.arc(px, py, pr, 0, Math.PI * 2); trackCtx.fill();
+    trackDirty = true;
+  }
+
+  /* ---- terrain mesh (shader patched with the track map) ---- */
+  const terrainMaterial = new THREE.MeshStandardMaterial({
+    map: buildRegolithTexture(),
+    color: 0xd8d2c8, roughness: 1.0, metalness: 0.0,
+  });
+  terrainMaterial.onBeforeCompile = function (shader) {
+    shader.uniforms.uTrack = { value: trackTexture };
+    shader.uniforms.uTerrainSize = { value: CFG.terrainSize };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>',
+        '#include <common>\nvarying vec2 vTrackUv;\nuniform float uTerrainSize;')
+      .replace('#include <begin_vertex>',
+        '#include <begin_vertex>\nvTrackUv = position.xz / uTerrainSize + 0.5;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>',
+        '#include <common>\nvarying vec2 vTrackUv;\nuniform sampler2D uTrack;')
+      .replace('#include <map_fragment>',
+        '#include <map_fragment>\n' +
+        'float trackK = texture2D( uTrack, vTrackUv ).r;\n' +
+        'diffuseColor.rgb *= mix( 0.34, 1.0, trackK );');
+  };
+
+  (function buildTerrainMesh() {
+    const geo = new THREE.PlaneGeometry(CFG.terrainSize, CFG.terrainSize, CFG.terrainSeg, CFG.terrainSeg);
+    geo.rotateX(-Math.PI / 2);
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      pos.setY(i, terrainHeight(pos.getX(i), pos.getZ(i)));
+    }
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, terrainMaterial);
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  })();
+
+  /* ---- horizon ring ---- */
+  (function buildHorizonRing() {
+    const N = 200;
+    const rings = [
+      { r: 620, base: -6 },
+      { r: 950, base: 0 },
+      { r: 1700, base: -40 },
+    ];
+    const verts = [];
+    for (let ri = 0; ri < rings.length; ri++) {
+      for (let i = 0; i <= N; i++) {
+        const a = (i / N) * Math.PI * 2;
+        let h = rings[ri].base;
+        if (ri === 1) {
+          const n = G.fbm2(Math.cos(a) * 3.1 + 9, Math.sin(a) * 3.1 + 9, 4);
+          h += 14 + Math.pow(n, 1.6) * 130;
+        }
+        verts.push(Math.cos(a) * rings[ri].r, h, Math.sin(a) * rings[ri].r);
+      }
+    }
+    const idx = [];
+    for (let ri = 0; ri < rings.length - 1; ri++) {
+      const o0 = ri * (N + 1), o1 = (ri + 1) * (N + 1);
+      for (let i = 0; i < N; i++) {
+        idx.push(o0 + i, o1 + i, o0 + i + 1, o0 + i + 1, o1 + i, o1 + i + 1);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    scene.add(new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+      color: 0x76726b, roughness: 1.0, metalness: 0.0,
+    })));
+  })();
+
+  /* ---- rocks & boulders ---- */
+  const boulderColliders = [];
+  function makeRockGeometry(detail, seed) {
+    const geo = new THREE.IcosahedronGeometry(1, detail);
+    const rng = G.mulberry32(seed);
+    const p = geo.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      p.setXYZ(i,
+        p.getX(i) * (0.78 + rng() * 0.5),
+        p.getY(i) * (0.62 + rng() * 0.5),
+        p.getZ(i) * (0.78 + rng() * 0.5));
+    }
+    geo.computeVertexNormals();
+    return geo;
+  }
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0x8d8a85, roughness: 0.95, metalness: 0.02 });
+
+  (function scatterRocks() {
+    const rng = G.mulberry32(4242);
+    const up = new THREE.Vector3(0, 1, 0);
+    const n = new THREE.Vector3(), q = new THREE.Vector3();
+    const quat = new THREE.Quaternion(), spin = new THREE.Quaternion();
+    const mtx = new THREE.Matrix4(), sc = new THREE.Vector3();
+    const col = new THREE.Color();
+    for (let variant = 0; variant < 3; variant++) {
+      const COUNT = 230;
+      const inst = new THREE.InstancedMesh(makeRockGeometry(0, 100 + variant), rockMat, COUNT);
+      inst.castShadow = true; inst.receiveShadow = true;
+      for (let i = 0; i < COUNT; i++) {
+        let x, z;
+        do { x = (rng() * 2 - 1) * (HALF - 18); z = (rng() * 2 - 1) * (HALF - 18); }
+        while (Math.hypot(x, z) < 14);
+        const s = 0.13 + rng() * rng() * 0.55;
+        terrainNormal(x, z, n);
+        quat.setFromUnitVectors(up, n);
+        spin.setFromAxisAngle(up, rng() * Math.PI * 2);
+        quat.multiply(spin);
+        sc.setScalar(s);
+        q.set(x, terrainHeight(x, z) - s * 0.18, z);
+        mtx.compose(q, quat, sc);
+        inst.setMatrixAt(i, mtx);
+        inst.setColorAt(i, col.setScalar(0.82 + rng() * 0.3));
+      }
+      inst.instanceMatrix.needsUpdate = true;
+      if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+      scene.add(inst);
+    }
+    for (let i = 0; i < 42; i++) {
+      let x, z;
+      do { x = (rng() * 2 - 1) * (HALF - 25); z = (rng() * 2 - 1) * (HALF - 25); }
+      while (Math.hypot(x, z) < 32);
+      const s = 0.9 + rng() * rng() * 2.6;
+      const mesh = new THREE.Mesh(makeRockGeometry(1, 500 + i), rockMat);
+      mesh.scale.setScalar(s);
+      mesh.position.set(x, terrainHeight(x, z) - s * 0.15, z);
+      terrainNormal(x, z, n);
+      mesh.quaternion.setFromUnitVectors(up, n);
+      mesh.rotateY(rng() * Math.PI * 2);
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      scene.add(mesh);
+      boulderColliders.push({ x, z, r: s * 0.88 });
+    }
+  })();
+
+  /* ---- paint hazard-zone tints once (visual cue for slip / rough / pads) */
+  (function paintZones() {
+    const rng = G.mulberry32(5151);
+    for (const s of SHARED.ZONES) {
+      const steps = 22;
+      for (let i = 0; i < steps; i++) {
+        const a = s.a0 + (s.a1 - s.a0) * (i / steps);
+        const r = SHARED.trackRadius(a) + (rng() * 2 - 1) * 26;
+        const x = Math.cos(a) * r, z = Math.sin(a) * r;
+        if (s.kind === 'slip') paintPatch(x, z, 10 + rng() * 8, 'rgba(210,225,255,0.10)');
+        else paintPatch(x, z, 7 + rng() * 7, 'rgba(0,0,0,0.16)');
+      }
+    }
+    for (const j of SHARED.JUMP_PADS) {
+      paintPatch(j.x, j.z, j.r, 'rgba(255,200,90,0.16)');
+    }
+  })();
+
+  /* ---- throttled GPU upload, called from main loop ---- */
+  function flushTrackTexture(now) {
+    if (trackDirty && now - lastTrackUpload > 120) {
+      trackTexture.needsUpdate = true;
+      trackDirty = false;
+      lastTrackUpload = now;
+    }
+  }
+
+  G.terrainHeight = terrainHeight;
+  G.terrainNormal = terrainNormal;
+  G.boulderColliders = boulderColliders;
+  G.trackStamp = trackStamp;
+  G.paintScorch = paintScorch;
+  G.flushTrackTexture = flushTrackTexture;
+  G.makeRockGeometry = makeRockGeometry;
+  G.rockMat = rockMat;
+})();

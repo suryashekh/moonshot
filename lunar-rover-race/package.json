@@ -1,0 +1,16 @@
+{
+  "name": "lunar-rover-race",
+  "version": "1.0.0",
+  "description": "LUNAR RALLY - multiplayer LAN lunar rover combat racing (Three.js + WebSockets)",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "three": "^0.128.0",
+    "ws": "^8.21.0"
+  }
+}

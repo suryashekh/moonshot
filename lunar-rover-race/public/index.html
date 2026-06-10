@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>LRV-01 · LUNAR RALLY</title>
+<style>
+  /* ============================================================
+     HUD / CHROME — mission-telemetry aesthetic (preserved from
+     the original simulator) + race / combat / lobby additions.
+     ============================================================ */
+  :root{
+    --panel: rgba(10, 12, 15, 0.58);
+    --line:  rgba(255, 255, 255, 0.14);
+    --ink:   #d7dade;
+    --dim:   #8a9097;
+    --amber: #ffb347;
+    --cyan:  #7fd4ff;
+    --red:   #ff6b5e;
+    --green: #7dff7a;
+  }
+  *{ box-sizing: border-box; }
+  html, body{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
+  body{
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    color: var(--ink);
+    -webkit-user-select:none; user-select:none;
+  }
+  #app{ position:fixed; inset:0; }
+  canvas{ display:block; }
+
+  .panel{
+    position:fixed; padding:12px 14px;
+    background:var(--panel); border:1px solid var(--line); border-radius:6px;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    pointer-events:none;
+  }
+  .lbl{ font-size:10px; letter-spacing:.14em; color:var(--dim); text-transform:uppercase; }
+  .val{ font-size:13px; color:var(--ink); }
+  .rule{ height:1px; background:var(--line); margin:9px 0; }
+
+  /* Telemetry — top left (original) */
+  #telemetry{ top:16px; left:16px; min-width:208px; }
+  #speed{ font-size:42px; line-height:1; font-weight:600; letter-spacing:-.02em; color:#fff; }
+  #speed small{ font-size:12px; font-weight:400; color:var(--dim); letter-spacing:.1em; margin-left:4px; }
+  .row{ display:flex; justify-content:space-between; gap:18px; margin-top:7px; }
+  #status{ color:var(--cyan); }
+  #status.air{ color:var(--amber); }
+  #status.skid{ color:var(--red); }
+  #slipbar{ width:74px; height:5px; background:rgba(255,255,255,.10); border-radius:3px; overflow:hidden; align-self:center; }
+  #slipfill{ width:0%; height:100%; background:var(--red); transition:width .08s linear; }
+
+  /* health + item — bottom left */
+  #vitals{ left:16px; bottom:16px; min-width:208px; }
+  #hpbar{ height:9px; background:rgba(255,255,255,.10); border-radius:4px; overflow:hidden; margin-top:5px; }
+  #hpfill{ width:100%; height:100%; background:var(--green); transition:width .15s ease, background .3s; }
+  #hpfill.low{ background:var(--amber); } #hpfill.crit{ background:var(--red); }
+  #itemslot{ margin-top:9px; display:flex; align-items:center; gap:10px; }
+  #itemicon{ width:38px; height:38px; border:1px solid var(--line); border-radius:6px;
+    display:flex; align-items:center; justify-content:center; font-size:19px; color:var(--amber);
+    background:rgba(255,179,71,.06); }
+  #itemicon.empty{ color:var(--dim); background:transparent; }
+  #itemname{ font-size:12px; letter-spacing:.1em; }
+  #shieldtag{ color:var(--cyan); display:none; }
+  #conn{ margin-top:8px; font-size:10px; color:var(--dim); letter-spacing:.12em; }
+  #conn.bad{ color:var(--red); }
+
+  /* race panel — top centre */
+  #race{ top:16px; left:50%; transform:translateX(-50%); text-align:center; min-width:280px; display:none; }
+  #rank{ font-size:34px; font-weight:600; color:#fff; line-height:1; }
+  #rank small{ font-size:13px; color:var(--dim); }
+  #lapline{ margin-top:4px; font-size:12px; letter-spacing:.14em; color:var(--cyan); }
+  #timers{ margin-top:5px; font-size:11px; color:var(--dim); display:flex; gap:16px; justify-content:center; }
+  #cpdist{ margin-top:4px; font-size:11px; color:var(--amber); letter-spacing:.1em; }
+
+  /* minimap — top right */
+  #minimapPanel{ top:16px; right:16px; padding:8px; display:none; }
+  #minimap{ display:block; width:188px; height:188px; }
+  /* killfeed under minimap */
+  #feed{ position:fixed; top:226px; right:16px; width:230px; text-align:right; pointer-events:none; }
+  .feedItem{ font-size:11px; letter-spacing:.06em; color:var(--ink); margin-top:4px;
+    background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:4px 8px;
+    display:inline-block; opacity:0; transform:translateX(12px); transition:all .25s ease; }
+  .feedItem.show{ opacity:1; transform:none; }
+
+  /* centre alerts */
+  #alert{ position:fixed; top:26%; left:50%; transform:translate(-50%,-50%); text-align:center;
+    font-size:20px; letter-spacing:.3em; color:var(--amber); text-shadow:0 0 18px rgba(255,179,71,.6);
+    pointer-events:none; opacity:0; transition:opacity .2s; }
+  #alert.show{ opacity:1; }
+  #alert.red{ color:var(--red); text-shadow:0 0 18px rgba(255,107,94,.7); }
+  #countdown{ position:fixed; inset:0; display:none; align-items:center; justify-content:center;
+    font-size:120px; font-weight:700; color:#fff; text-shadow:0 0 40px rgba(127,212,255,.8); pointer-events:none; }
+  #respawnOv{ position:fixed; inset:0; display:none; align-items:center; justify-content:center;
+    flex-direction:column; gap:8px; background:rgba(80,0,0,.18); pointer-events:none; }
+  #respawnOv .big{ font-size:30px; letter-spacing:.3em; color:var(--red); }
+  #lockon{ position:fixed; bottom:26%; left:50%; transform:translateX(-50%);
+    color:var(--red); font-size:15px; letter-spacing:.34em; display:none;
+    animation:lock .5s steps(2) infinite; pointer-events:none; }
+  @keyframes lock{ 50%{ opacity:.25; } }
+
+  /* damage / hazard overlays */
+  #dmgflash{ position:fixed; inset:0; pointer-events:none; opacity:0;
+    background:radial-gradient(ellipse at 50% 50%, transparent 42%, rgba(255,40,20,.45) 100%); transition:opacity .12s; }
+  #flarewash{ position:fixed; inset:0; pointer-events:none; opacity:0; background:#fff; transition:opacity .8s; }
+  #stormwash{ position:fixed; inset:0; pointer-events:none; opacity:0;
+    background:radial-gradient(ellipse at 50% 60%, rgba(120,110,95,.42), rgba(70,64,55,.62)); transition:opacity 1.2s; }
+  body.glitch .panel{ animation: glitch .12s steps(2) infinite; }
+  @keyframes glitch{ 25%{ transform:translate(1px,-1px) } 75%{ transform:translate(-1px,1px) } }
+
+  /* scoreboard */
+  #score{ position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); min-width:430px;
+    display:none; pointer-events:none; padding:16px 18px; }
+  #score table{ width:100%; border-collapse:collapse; font-size:12px; }
+  #score th{ text-align:left; color:var(--dim); font-weight:400; letter-spacing:.12em; font-size:10px; padding:4px 8px; }
+  #score td{ padding:5px 8px; border-top:1px solid var(--line); }
+  .dot{ display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:7px; }
+
+  /* help / mission (original) */
+  #help{ right:16px; bottom:16px; font-size:11px; line-height:1.85; color:var(--dim); }
+  #help b{ color:var(--ink); font-weight:600; }
+  #mission{ display:none; }
+  #mission .craft{ font-size:12px; color:var(--amber); letter-spacing:.22em; }
+
+  #vignette{ position:fixed; inset:0; pointer-events:none;
+    background: radial-gradient(ellipse at 50% 46%, transparent 52%, rgba(0,0,0,.34) 88%, rgba(0,0,0,.62) 100%); }
+
+  /* Boot screen (original) */
+  #boot{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:#000; z-index:30; flex-direction:column; gap:14px; transition: opacity .7s ease; }
+  #boot .craft{ font-size:13px; letter-spacing:.34em; color:var(--amber); }
+  #boot .sub{ font-size:11px; letter-spacing:.2em; color:var(--dim); animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse{ 50%{ opacity:.35; } }
+  #boot.done{ opacity:0; pointer-events:none; }
+
+  /* ===================== LOBBY ============================== */
+  #lobby{ position:fixed; inset:0; z-index:20; display:flex; align-items:center; justify-content:center;
+    background:rgba(0,0,0,.42); }
+  #lobby.hidden{ display:none; }
+  #lobbyCard{ width:min(430px, 92vw); background:rgba(8,10,13,.86); border:1px solid var(--line);
+    border-radius:8px; padding:26px 26px 22px; backdrop-filter:blur(10px); }
+  #lobbyCard h1{ margin:0 0 2px; font-size:16px; letter-spacing:.34em; color:var(--amber); font-weight:600; }
+  #lobbyCard .sub{ font-size:11px; color:var(--dim); letter-spacing:.16em; margin-bottom:18px; }
+  .field{ margin-bottom:12px; }
+  .field label{ display:block; font-size:10px; letter-spacing:.16em; color:var(--dim); margin-bottom:5px; text-transform:uppercase; }
+  .field input{ width:100%; background:rgba(255,255,255,.05); border:1px solid var(--line); color:#fff;
+    font:inherit; font-size:14px; padding:9px 11px; border-radius:5px; outline:none; letter-spacing:.1em; text-transform:uppercase; }
+  .field input:focus{ border-color:var(--cyan); }
+  .btn{ display:block; width:100%; padding:11px; margin-top:9px; font:inherit; font-size:12px;
+    letter-spacing:.24em; text-transform:uppercase; cursor:pointer; border-radius:5px;
+    border:1px solid var(--amber); color:var(--amber); background:rgba(255,179,71,.08); }
+  .btn:hover{ background:rgba(255,179,71,.2); }
+  .btn.alt{ border-color:var(--cyan); color:var(--cyan); background:rgba(127,212,255,.07); }
+  .btn.alt:hover{ background:rgba(127,212,255,.18); }
+  .btn:disabled{ opacity:.35; cursor:default; }
+  .btn.ghost{ border-color:var(--line); color:var(--dim); background:transparent; font-size:10px; padding:8px; }
+  #lobbyErr{ color:var(--red); font-size:11px; min-height:15px; margin-top:8px; letter-spacing:.08em; }
+  #roomInfo{ display:none; }
+  #roomCode{ font-size:30px; letter-spacing:.5em; color:#fff; text-align:center; margin:6px 0 2px; }
+  #shareUrl{ font-size:11px; color:var(--cyan); text-align:center; letter-spacing:.06em; word-break:break-all; }
+  #plist{ list-style:none; margin:14px 0 4px; padding:0; }
+  #plist li{ display:flex; align-items:center; font-size:13px; padding:7px 4px; border-top:1px solid var(--line); letter-spacing:.1em; }
+  #plist li .tag{ margin-left:auto; font-size:9px; color:var(--dim); letter-spacing:.2em; }
+  #lobbyHint{ font-size:10px; color:var(--dim); letter-spacing:.1em; margin-top:10px; line-height:1.7; }
+
+  /* end screen */
+  #end{ position:fixed; inset:0; z-index:19; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.5); }
+  #endCard{ width:min(470px, 94vw); background:rgba(8,10,13,.9); border:1px solid var(--line);
+    border-radius:8px; padding:24px; backdrop-filter:blur(10px); }
+  #endCard h1{ margin:0 0 14px; font-size:15px; letter-spacing:.32em; color:var(--amber); text-align:center; }
+  #endCard table{ width:100%; border-collapse:collapse; font-size:13px; }
+  #endCard td{ padding:7px 6px; border-top:1px solid var(--line); }
+  #endCard td.r{ text-align:right; color:var(--dim); font-size:11px; }
+  #endWait{ text-align:center; color:var(--dim); font-size:11px; letter-spacing:.15em; margin-top:12px; }
+
+  /* Touch controls (original + item button) */
+  #touch{ position:fixed; inset:0; pointer-events:none; display:none; }
+  #touch.on{ display:block; }
+  .tbtn{
+    position:fixed; width:62px; height:62px; border-radius:50%;
+    background:rgba(255,255,255,.07); border:1px solid var(--line); color:var(--ink);
+    font-size:20px; display:flex; align-items:center; justify-content:center;
+    pointer-events:auto; touch-action:none; -webkit-tap-highlight-color:transparent;
+  }
+  .tbtn:active{ background:rgba(255,179,71,.25); border-color:var(--amber); }
+  #t-left { left:18px;  bottom:84px; }
+  #t-right{ left:96px;  bottom:84px; }
+  #t-fwd  { right:18px; bottom:148px; }
+  #t-back { right:18px; bottom:72px; }
+  #t-item { right:96px; bottom:110px; color:var(--amber); }
+  #t-brake{ left:57px; bottom:158px; font-size:12px; letter-spacing:.1em; }
+  @media (pointer:coarse){ #help{ display:none; } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<!-- HUD -->
+<div class="panel" id="telemetry">
+  <div class="lbl">Ground speed</div>
+  <div id="speed">0<small>KM/H</small></div>
+  <div class="rule"></div>
+  <div class="row"><span class="lbl">Status</span><span class="val" id="status">GROUNDED</span></div>
+  <div class="row"><span class="lbl">Slip</span><span id="slipbar"><span id="slipfill"></span></span></div>
+  <div class="row"><span class="lbl">Altitude</span><span class="val" id="alt">0.0 m</span></div>
+  <div class="row"><span class="lbl">Odometer</span><span class="val" id="odo">0.00 km</span></div>
+</div>
+
+<div class="panel" id="vitals">
+  <div class="row" style="margin-top:0"><span class="lbl" id="pname">PILOT</span><span class="lbl" id="shieldtag">◉ SHIELD</span></div>
+  <div id="hpbar"><div id="hpfill"></div></div>
+  <div id="itemslot">
+    <div id="itemicon" class="empty">—</div>
+    <div>
+      <div class="lbl">Weapon · Shift</div>
+      <div id="itemname" class="val">NO PAYLOAD</div>
+    </div>
+  </div>
+  <div id="conn">LINK: OFFLINE</div>
+</div>
+
+<div class="panel" id="race">
+  <div id="rank">—<small></small></div>
+  <div id="lapline">LAP 1 / 3 · GATE 0 / 10</div>
+  <div id="timers"><span id="rtime">00:00.0</span><span id="rbest">BEST —</span></div>
+  <div id="cpdist">NEXT GATE — m</div>
+</div>
+
+<div class="panel" id="minimapPanel"><canvas id="minimap" width="376" height="376"></canvas></div>
+<div id="feed"></div>
+
+<div id="alert"></div>
+<div id="countdown"></div>
+<div id="lockon">⚠ MISSILE LOCK ⚠</div>
+<div id="respawnOv"><div class="big">ROVER DESTROYED</div><div class="lbl" id="respawnIn">RESPAWN IN 3.0</div></div>
+<div id="dmgflash"></div><div id="flarewash"></div><div id="stormwash"></div>
+
+<div class="panel" id="score"><table><thead>
+  <tr><th>#</th><th>PILOT</th><th>LAP</th><th>GATE</th><th>BEST LAP</th><th>HP</th></tr>
+</thead><tbody id="scoreBody"></tbody></table></div>
+
+<div class="panel" id="help">
+  <b>W / ↑</b> throttle &nbsp; <b>S / ↓</b> brake · reverse<br>
+  <b>A D / ← →</b> steer &nbsp; <b>SPACE</b> handbrake drift<br>
+  <b>SHIFT</b> use weapon &nbsp; <b>TAB</b> scoreboard<br>
+  <b>L</b> headlights &nbsp; <b>R</b> respawn at gate
+</div>
+
+<div class="panel" id="mission">
+  <div class="craft">LRV-01</div>
+  <div>Mare Tranquillitatis · Sol 412</div>
+</div>
+
+<div id="vignette"></div>
+
+<div id="boot">
+  <div class="craft">LRV-01 · LUNAR RALLY</div>
+  <div class="sub">GENERATING REGOLITH TERRAIN…</div>
+</div>
+
+<!-- LOBBY -->
+<div id="lobby" class="hidden">
+  <div id="lobbyCard">
+    <h1>LUNAR RALLY</h1>
+    <div class="sub">MULTIPLAYER REGOLITH RACING · SAME WI-FI</div>
+
+    <div id="menuPane">
+      <div class="field"><label>Pilot name</label><input id="nameIn" maxlength="12" placeholder="CALLSIGN"></div>
+      <button class="btn" id="hostBtn">Host Game</button>
+      <div class="rule"></div>
+      <div class="field"><label>Room code</label><input id="codeIn" maxlength="4" placeholder="e.g. K7PD"></div>
+      <button class="btn alt" id="joinBtn">Join Game</button>
+      <div id="lobbyHint">All devices must open this same address on the host's Wi-Fi.<br>
+      Host runs <b>node server/server.js</b>; others browse to the LAN URL it prints.</div>
+    </div>
+
+    <div id="roomInfo">
+      <div class="lbl" style="text-align:center">Room code</div>
+      <div id="roomCode">····</div>
+      <div id="shareUrl"></div>
+      <ul id="plist"></ul>
+      <button class="btn" id="startBtn" disabled>Start Race</button>
+      <button class="btn ghost" id="soloBtn">Solo test run</button>
+    </div>
+    <div id="lobbyErr"></div>
+  </div>
+</div>
+
+<!-- END SCREEN -->
+<div id="end"><div id="endCard">
+  <h1>RACE COMPLETE</h1>
+  <table><tbody id="endBody"></tbody></table>
+  <button class="btn" id="againBtn" style="display:none">Return to lobby</button>
+  <div id="endWait">WAITING FOR HOST…</div>
+</div></div>
+
+<!-- Touch fallback -->
+<div id="touch">
+  <div class="tbtn" id="t-left"  data-k="left">◀</div>
+  <div class="tbtn" id="t-right" data-k="right">▶</div>
+  <div class="tbtn" id="t-fwd"   data-k="fwd">▲</div>
+  <div class="tbtn" id="t-back"  data-k="back">▼</div>
+  <div class="tbtn" id="t-brake" data-k="brake">DRIFT</div>
+  <div class="tbtn" id="t-item">☄</div>
+</div>
+
+<script src="/lib/three.min.js"></script>
+<script>
+  if (!window.THREE) document.write('<script src="https:\/\/cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><\/script>');
+</script>
+<script src="/shared/constants.js"></script>
+<script src="/js/util.js"></script>
+<script src="/js/scene.js"></script>
+<script src="/js/terrain.js"></script>
+<script src="/js/dust.js"></script>
+<script src="/js/rover.js"></script>
+<script src="/js/remote.js"></script>
+<script src="/js/race.js"></script>
+<script src="/js/asteroids.js"></script>
+<script src="/js/powerups.js"></script>
+<script src="/js/combat.js"></script>
+<script src="/js/hazards.js"></script>
+<script src="/js/hud.js"></script>
+<script src="/js/network.js"></script>
+<script src="/js/main.js"></script>
+</body>
+</html>
