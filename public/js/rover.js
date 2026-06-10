@@ -9,92 +9,116 @@
   const CFG = G.CFG, clamp = G.clamp, lerp = G.lerp, HALF = G.HALF;
   const S = SHARED;
 
+  /* ---------------- rover model (GLB) ----------------
+     The blocky procedural buggy was replaced with the lunar-rover GLB
+     (public/models/rover.glb). The model is loaded once, normalized to
+     the sim's footprint, then cloned per rig. Tunables below let you
+     re-fit the asset without touching the rest of the file. */
+  const MODEL_URL      = '/models/rover.glb';
+  const MODEL_TARGET_LEN = 3.4;        // world units along the model's longest horizontal axis
+  const MODEL_YAW        = Math.PI / 2; // model length runs along X; rotate 90° to face +Z (forward).
+                                        // If it drives backward, flip to -Math.PI / 2.
+  const MODEL_Y_OFFSET   = 0;          // nudge up/down if wheels float / sink after auto-fit
+
+  let _modelProto = null;         // normalized THREE.Group, cloned per rig
+  let _modelFailed = false;
+  const _pendingRigs = [];        // rigs built before the model finished loading
+
+  // Center horizontally, rest the base on y=0, scale to MODEL_TARGET_LEN, face +Z.
+  function normalizeModel(root) {
+    const box = new THREE.Box3().setFromObject(root);
+    const size = new THREE.Vector3(); box.getSize(size);
+    const center = new THREE.Vector3(); box.getCenter(center);
+    const longest = Math.max(size.x, size.z) || 1;
+    const s = MODEL_TARGET_LEN / longest;
+
+    root.position.set(-center.x, -box.min.y + MODEL_Y_OFFSET, -center.z);
+    root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+
+    const wrap = new THREE.Group();
+    wrap.add(root);
+    wrap.scale.setScalar(s);
+    wrap.rotation.y = MODEL_YAW;
+    return wrap;
+  }
+
+  function attachModelTo(rig) {
+    if (_modelFailed) return;
+    if (!_modelProto) { _pendingRigs.push(rig); return; }
+    const m = _modelProto.clone(true);   // shares geometry/material refs across players
+    if (rig.placeholder) { rig.group.remove(rig.placeholder); rig.placeholder = null; }
+    rig.group.add(m);
+    rig.model = m;
+  }
+
+  (function loadModel() {
+    if (!THREE.GLTFLoader) {
+      console.warn('[rover] THREE.GLTFLoader unavailable — keeping placeholder body');
+      _modelFailed = true;
+      return;
+    }
+    new THREE.GLTFLoader().load(
+      MODEL_URL,
+      (gltf) => {
+        _modelProto = normalizeModel(gltf.scene);
+        for (const rig of _pendingRigs) attachModelTo(rig);
+        _pendingRigs.length = 0;
+      },
+      undefined,
+      (err) => {
+        console.error('[rover] failed to load', MODEL_URL, err);
+        _modelFailed = true;
+      }
+    );
+  })();
+
   /* ---------------- buggy factory ----------------
-     Returns a rig usable by both the local player and remotes. */
+     Returns a rig usable by both the local player and remotes. The visible
+     body is the loaded GLB; the wheel pivots/spins and other fields below are
+     kept (as lightweight, mostly invisible rigging) so the physics step,
+     syncBuggy(), and remote interpolation keep their existing contract. */
   function buildBuggy(accentHex) {
     const buggy = new THREE.Group();
 
+    // fender = the per-player accent color (set at build time, re-tinted via setMyColor).
     const MAT = {
-      gold:   new THREE.MeshStandardMaterial({ color: 0xc9a227, metalness: 0.9,  roughness: 0.32 }),
-      silver: new THREE.MeshStandardMaterial({ color: 0xb9bdc4, metalness: 0.85, roughness: 0.42 }),
-      dark:   new THREE.MeshStandardMaterial({ color: 0x3a3d42, metalness: 0.55, roughness: 0.62 }),
-      fender: new THREE.MeshStandardMaterial({ color: accentHex, metalness: 0.3, roughness: 0.72, side: THREE.DoubleSide }),
-      seat:   new THREE.MeshStandardMaterial({ color: 0xb59a6a, roughness: 0.92 }),
-      tire:   new THREE.MeshStandardMaterial({ color: 0x2e2e31, roughness: 0.95, metalness: 0.08 }),
-      suit:   new THREE.MeshStandardMaterial({ color: 0xe9e9e6, roughness: 0.85 }),
-      visor:  new THREE.MeshStandardMaterial({ color: 0x6b5410, metalness: 1.0,  roughness: 0.12 }),
+      fender: new THREE.MeshStandardMaterial({ color: accentHex, metalness: 0.3, roughness: 0.6 }),
       lens:   new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xfff3cf, emissiveIntensity: 0.25 }),
     };
 
-    function addBox(w, h, d, mat, x, y, z, parent) {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-      m.position.set(x, y, z);
-      m.castShadow = true; m.receiveShadow = true;
-      (parent || buggy).add(m);
-      return m;
-    }
-    function addCyl(r, h, seg, mat, x, y, z, parent) {
-      const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, seg), mat);
-      m.position.set(x, y, z);
-      m.castShadow = true; m.receiveShadow = true;
-      (parent || buggy).add(m);
-      return m;
-    }
-
-    // --- Chassis frame ---
-    addCyl(0.05, 3.0, 8, MAT.silver, -0.55, 0.50, 0).rotation.x = Math.PI / 2;
-    addCyl(0.05, 3.0, 8, MAT.silver,  0.55, 0.50, 0).rotation.x = Math.PI / 2;
-    for (const z of [-1.1, 0, 1.1]) {
-      addCyl(0.045, 1.25, 8, MAT.silver, 0, 0.50, z).rotation.z = Math.PI / 2;
-    }
-    addBox(1.5, 0.06, 2.5, MAT.dark, 0, 0.56, -0.05);          // floor pan
-    addBox(1.1, 0.34, 0.5, MAT.gold, 0, 0.80, 1.20);           // forward LCRU
-    addBox(1.25, 0.42, 0.55, MAT.gold, 0, 0.84, -1.18);        // aft pallet
-    addBox(0.25, 0.30, 0.35, MAT.dark, 0, 0.78, 0.35);         // console
-    // accent canopy strip so player color reads from far away / above
-    addBox(1.3, 0.05, 0.7, MAT.fender, 0, 1.02, -0.7);
-
-    // --- Seats ---
-    for (const sx of [-0.38, 0.38]) {
-      addBox(0.55, 0.07, 0.50, MAT.seat, sx, 0.82, -0.05);
-      addBox(0.55, 0.50, 0.07, MAT.seat, sx, 1.06, -0.33).rotation.x = 0.15;
-    }
-
-    // --- High-gain dish + whip ---
-    addCyl(0.02, 0.55, 6, MAT.silver, 0, 1.25, 1.30);
-    const dish = new THREE.Mesh(
-      new THREE.SphereGeometry(0.30, 16, 10, 0, Math.PI * 2, 0, Math.PI / 2),
-      MAT.silver
+    // Placeholder shown during the (large) GLB download and if loading fails,
+    // so the rover is always visible and driveable. Removed once the model attaches.
+    const placeholder = new THREE.Mesh(
+      new THREE.BoxGeometry(1.4, 0.6, 2.6),
+      new THREE.MeshStandardMaterial({ color: 0x6b6f76, metalness: 0.5, roughness: 0.6 })
     );
-    dish.rotation.x = Math.PI;
-    dish.scale.y = 0.55;
-    dish.position.set(0, 1.56, 1.30);
-    dish.castShadow = true;
-    buggy.add(dish);
-    addCyl(0.008, 1.2, 5, MAT.silver, -0.50, 1.55, -1.18);
-    addBox(0.05, 0.05, 0.05, MAT.fender, -0.50, 2.16, -1.18);
+    placeholder.position.y = 0.7;
+    placeholder.castShadow = true; placeholder.receiveShadow = true;
+    buggy.add(placeholder);
 
-    // --- Astronaut ---
-    addBox(0.42, 0.50, 0.30, MAT.suit, 0.38, 1.12, -0.05);
-    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.19, 16, 12), MAT.suit);
-    helmet.position.set(0.38, 1.52, -0.02); helmet.castShadow = true; buggy.add(helmet);
-    const visor = new THREE.Mesh(new THREE.SphereGeometry(0.15, 16, 12), MAT.visor);
-    visor.position.set(0.38, 1.52, 0.08); visor.scale.z = 0.62; buggy.add(visor);
-    for (const ax of [0.18, 0.58]) {
-      const arm = addCyl(0.055, 0.5, 6, MAT.suit, ax, 1.18, 0.16);
-      arm.rotation.x = -1.05;
+    // Accent beacon so each player's color reads from far away / above —
+    // the GLB has its own baked materials, so this is what setMyColor tints.
+    const beacon = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.55, 8), MAT.fender);
+    beacon.position.set(0, 2.25, 0);
+    beacon.castShadow = true;
+    buggy.add(beacon);
+
+    // Headlight lenses (visible emissive source) + spotlight, at the model's nose (+Z).
+    for (const lx of [-0.45, 0.45]) {
+      const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.05, 12), MAT.lens);
+      lens.position.set(lx, 0.7, MODEL_TARGET_LEN / 2 - 0.05);
+      lens.rotation.x = Math.PI / 2;
+      buggy.add(lens);
     }
-
-    // --- Headlights ---
-    addCyl(0.06, 0.05, 10, MAT.lens, -0.45, 0.72, 1.50).rotation.x = Math.PI / 2;
-    addCyl(0.06, 0.05, 10, MAT.lens,  0.45, 0.72, 1.50).rotation.x = Math.PI / 2;
     const headlamp = new THREE.SpotLight(0xfff2cf, 0, 70, 0.55, 0.5, 1.2);
     headlamp.position.set(0, 0.85, 1.4);
     buggy.add(headlamp);
     headlamp.target.position.set(0, 0.1, 15);
     buggy.add(headlamp.target);
 
-    // --- Wheels ---
+    // --- Wheel footprint (drives physics + suspension/steer/spin animation).
+    // Kept identical to the original sim; the pivots/spins are invisible rigging
+    // nodes the GLB rides on, so syncBuggy()/remote.js animate them harmlessly.
     const WHEELS_LOCAL = [
       { lx: -CFG.trackWidth / 2, lz:  CFG.wheelBase / 2, front: true  },
       { lx:  CFG.trackWidth / 2, lz:  CFG.wheelBase / 2, front: true  },
@@ -103,47 +127,11 @@
     ];
     const wheelPivots = [], wheelSpins = [];
     const WHEEL_REST_Y = CFG.wheelRadius;
-
     for (const w of WHEELS_LOCAL) {
       const pivot = new THREE.Group();
       pivot.position.set(w.lx, WHEEL_REST_Y, w.lz);
-      buggy.add(pivot);
       const spin = new THREE.Group();
       pivot.add(spin);
-
-      const tire = new THREE.Mesh(new THREE.TorusGeometry(0.30, 0.115, 10, 22), MAT.tire);
-      tire.rotation.y = Math.PI / 2;
-      tire.castShadow = true; tire.receiveShadow = true;
-      spin.add(tire);
-
-      const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.22, 12), MAT.silver);
-      hub.rotation.z = Math.PI / 2;
-      hub.castShadow = true;
-      spin.add(hub);
-
-      for (let k = 0; k < 3; k++) {
-        const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.58, 0.05), MAT.dark);
-        spoke.rotation.x = k * Math.PI / 3;
-        spoke.castShadow = true;
-        spin.add(spoke);
-      }
-      for (let k = 0; k < 14; k++) {
-        const t = (k / 14) * Math.PI * 2;
-        const block = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.06, 0.08), MAT.tire);
-        block.position.set(0, 0.405 * Math.cos(t), 0.405 * Math.sin(t));
-        block.rotation.x = t;
-        spin.add(block);
-      }
-
-      const fender = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.58, 0.58, 0.36, 14, 1, true, 0.55, Math.PI - 1.1),
-        MAT.fender
-      );
-      fender.rotation.z = Math.PI / 2;
-      fender.position.y = 0.06;
-      fender.castShadow = true;
-      pivot.add(fender);
-
       wheelPivots.push(pivot);
       wheelSpins.push(spin);
     }
@@ -167,11 +155,13 @@
       MAT.lens.emissiveIntensity = on ? 3.0 : 0.25;
     }
 
-    return {
+    const rig = {
       group: buggy, MAT, WHEELS_LOCAL, wheelPivots, wheelSpins,
-      WHEEL_REST_Y, headlamp, shieldMesh,
+      WHEEL_REST_Y, headlamp, shieldMesh, placeholder, model: null,
       setLights, get lightsOn() { return lightsOn; },
     };
+    attachModelTo(rig);   // swaps in the GLB now if loaded, else when it arrives
+    return rig;
   }
   G.buildBuggy = buildBuggy;
 

@@ -30,6 +30,7 @@ const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css', '.png': 'image/png', '.ico': 'image/x-icon',
   '.json': 'application/json', '.map': 'application/json',
+  '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json',
 };
 const httpServer = http.createServer((req, res) => {
   let url = decodeURIComponent((req.url || '/').split('?')[0]);
@@ -37,6 +38,8 @@ const httpServer = http.createServer((req, res) => {
   let file;
   if (url === '/lib/three.min.js') {
     file = path.join(ROOT, 'node_modules', 'three', 'build', 'three.min.js');
+  } else if (url === '/lib/GLTFLoader.js') {
+    file = path.join(ROOT, 'node_modules', 'three', 'examples', 'js', 'loaders', 'GLTFLoader.js');
   } else if (url === '/shared/constants.js') {
     file = path.join(ROOT, 'shared', 'constants.js');
   } else {
