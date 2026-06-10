@@ -295,6 +295,12 @@
     for (const j of SHARED.JUMP_PADS) {
       paintPatch(j.x, j.z, j.r, 'rgba(255,200,90,0.16)');
     }
+    // bright approach marker leading onto each launch ramp
+    for (const rp of SHARED.RAMPS) {
+      paintPatch(rp.x, rp.z, 11, 'rgba(255,179,71,0.22)');
+      const bx = rp.x - Math.sin(rp.heading) * 12, bz = rp.z - Math.cos(rp.heading) * 12;
+      paintPatch(bx, bz, 7, 'rgba(255,179,71,0.15)');
+    }
   })();
 
   /* ---- throttled GPU upload, called from main loop ---- */

@@ -99,37 +99,57 @@
       const wedge = new THREE.Mesh(
         makeRampGeometry(rp.w, rp.len, rp.h),
         new THREE.MeshStandardMaterial({
-          color: 0x4a5562, metalness: 0.65, roughness: 0.45, side: THREE.DoubleSide,
+          color: 0x8b96a5, metalness: 0.55, roughness: 0.4,
+          emissive: 0x2a3340, emissiveIntensity: 0.6, side: THREE.DoubleSide,
         })
       );
       wedge.castShadow = true; wedge.receiveShadow = true;
       grp.add(wedge);
 
-      // channel walls above the deck (the slide rails in the reference)
       const slope = Math.atan2(rp.h, rp.len);
+      // amber chevron stripes up the deck — readable from a distance
+      for (let i = 0; i < 4; i++) {
+        const tz = -rp.len / 2 + (i + 0.5) * (rp.len / 4);
+        const ty = 0.1 + (tz + rp.len / 2) / rp.len * rp.h;
+        const stripe = new THREE.Mesh(
+          new THREE.BoxGeometry(rp.w - 0.6, 0.1, 0.55),
+          new THREE.MeshBasicMaterial({ color: 0xffb347 })
+        );
+        stripe.rotation.x = -slope;
+        stripe.position.set(0, ty + 0.06, tz);
+        grp.add(stripe);
+      }
+      // glowing rails along both inclined edges
       for (const sx of [-(rp.w / 2 - 0.14), rp.w / 2 - 0.14]) {
         const wall = new THREE.Mesh(
-          new THREE.BoxGeometry(0.25, 1.0, rp.len * 1.02),
+          new THREE.BoxGeometry(0.3, 1.0, rp.len * 1.02),
           new THREE.MeshStandardMaterial({ color: 0x39424d, metalness: 0.6, roughness: 0.5 })
         );
         wall.rotation.x = -slope;
         wall.position.set(sx, rp.h / 2 + 0.5, 0);
         wall.castShadow = true;
         grp.add(wall);
+        const railGlow = new THREE.Mesh(
+          new THREE.BoxGeometry(0.34, 0.12, rp.len * 1.02),
+          new THREE.MeshBasicMaterial({ color: 0xffb347 })
+        );
+        railGlow.rotation.x = -slope;
+        railGlow.position.set(sx, rp.h / 2 + 1.02, 0);
+        grp.add(railGlow);
       }
       // glowing launch lip across the top edge
       const lip = new THREE.Mesh(
-        new THREE.BoxGeometry(rp.w, 0.14, 0.3),
-        new THREE.MeshBasicMaterial({ color: 0xffb347 })
+        new THREE.BoxGeometry(rp.w, 0.18, 0.35),
+        new THREE.MeshBasicMaterial({ color: 0xffd76b })
       );
-      lip.position.set(0, rp.h + 0.05, rp.len / 2 - 0.15);
+      lip.position.set(0, rp.h + 0.07, rp.len / 2 - 0.18);
       grp.add(lip);
       const glow = new THREE.Sprite(new THREE.SpriteMaterial({
         map: G.glowTex, color: 0xffb347, transparent: true,
-        blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.45,
+        blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.6,
       }));
-      glow.scale.setScalar(6);
-      glow.position.set(0, rp.h + 1.2, rp.len / 2 - 0.5);
+      glow.scale.setScalar(11);
+      glow.position.set(0, rp.h + 1.6, rp.len / 2 - 0.5);
       grp.add(glow);
       G.scene.add(grp);
     }
@@ -156,43 +176,19 @@
     }
   })();
 
-  /* ---------------- next-gate pointer + wrong-way detector ----------------
-     A cyan arrow floats over MY rover, always aiming at my next gate, so
-     the direction of travel is never ambiguous. Driving away from the gate
-     at speed for >1 s flashes the WRONG WAY banner. */
-  const gateArrow = (function () {
-    const grp = new THREE.Group();
-    const cone = new THREE.Mesh(
-      new THREE.ConeGeometry(0.55, 1.6, 10),
-      new THREE.MeshBasicMaterial({ color: 0x35e0ff })
-    );
-    cone.rotation.x = Math.PI / 2;       // point along +Z
-    cone.position.z = 0.5;
-    grp.add(cone);
-    const glow = new THREE.Sprite(new THREE.SpriteMaterial({
-      map: G.glowTex, color: 0x35e0ff, transparent: true,
-      blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.5,
-    }));
-    glow.scale.setScalar(2.6);
-    grp.add(glow);
-    grp.visible = false;
-    G.scene.add(grp);
-    return grp;
-  })();
-
+  /* ---------------- wrong-way detector ----------------
+     Driving away from the next gate at speed for >1 s flashes the
+     WRONG WAY banner (the beacon beam on the cyan gate shows the way). */
   const elWrong = document.getElementById('wrongway');
   let wrongSince = 0;
 
   function updateGuidance(dt) {
     const st = G.state, r = G.rover;
     const racing = st.phase === 'race' && !st.finished && !(st.deadUntil > G.serverNow());
-    gateArrow.visible = racing;
     if (!racing) { elWrong.classList.remove('show'); wrongSince = 0; return; }
 
     const g = GATES[st.nextGate];
     const dx = g.x - r.pos.x, dz = g.z - r.pos.z;
-    gateArrow.position.set(r.pos.x, r.pos.y + 4.4 + Math.sin(performance.now() * 0.004) * 0.25, r.pos.z);
-    gateArrow.rotation.y = Math.atan2(dx, dz);
 
     // wrong way: moving fast with velocity pointing away from the next gate
     const sp = Math.hypot(r.vel.x, r.vel.z);

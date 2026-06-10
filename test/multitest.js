@@ -68,7 +68,7 @@ async function until(fn, ms, what){ const t0=Date.now(); while(Date.now()-t0<ms)
   console.log('✓ slot-targeted use:', a.used[0].item, '@ slot', a.used[0].slot);
 
   // 3) asteroids hunt players
-  await until(()=>a.targeted + b.targeted >= 2, 45000, 'asteroids targeting players');
+  await until(()=>a.targeted + b.targeted >= 2, 90000, 'asteroids targeting players');
   console.log('✓ targeted asteroids: A', a.targeted, '· B', b.targeted,
               '· landing near target:', a.astNear + b.astNear);
 

@@ -218,7 +218,7 @@
       minSpeed: 8,     // need to be moving to launch
       minAlign: 0.55,  // must be driving along the ramp, not clipping it sideways
       kick: 0.42,      // vel.y += hSpeed * kick (clamped)
-      w: 7, len: 8.5, h: 2.6,   // wedge geometry
+      w: 9, len: 10, h: 3.0,   // wedge geometry
     };
   });
 
@@ -227,12 +227,12 @@
      your velocity, with a small body tilt — no tumbling). Banked yaw
      spin pays out a boost on landing.                               */
   const STUNT = {
-    spinRate: 1.6,    // rad/s yaw from steering while airborne (gentle)
-    airCtrl: 4.5,     // m/s² horizontal nudge from throttle in air
-    tiltMax: 0.32,    // max visual pitch tilt from air control (rad)
-    tiltRate: 3.0,    // how fast the tilt eases toward its target
-    minAirS: 0.5,     // must be airborne at least this long
-    minTrick: 2.2,    // banked spin radians to count as a stunt
+    spinRate: 0.6,    // rad/s yaw from steering while airborne (barely-there)
+    airCtrl: 2.2,     // m/s² horizontal nudge from throttle in air
+    tiltMax: 0.12,    // max visual pitch tilt from air control (rad)
+    tiltRate: 2.2,    // how fast the tilt eases toward its target
+    minAirS: 0.6,     // must be airborne at least this long
+    minTrick: 1.0,    // banked spin radians to count as a stunt
     boostMs: 2400, boostSpeed: 8,   // clean landing reward
   };
 
