@@ -13,7 +13,7 @@ async function until(fn, ms, what){ const t0=Date.now(); while(Date.now()-t0<ms)
   const mk = (n) => {
     const ws = new WebSocket('ws://localhost:3000/ws');
     const c = { ws, n, id:0, code:null, items:[], used:[], targeted:0, astNear:0,
-      dmgMsgs:0, x:0, z:0,
+      dmgMsgs:0, x:0, z:0, blasts:0, ammoMsgs:[], aliens:0, zaps:0, alienDmg:0,
       send:o=>ws.send(JSON.stringify(o)) };
     ws.on('message', d => { const m = JSON.parse(d);
       if (m.t==='joined'){ c.id=m.id; c.code=m.code; }
@@ -24,6 +24,12 @@ async function until(fn, ms, what){ const t0=Date.now(); while(Date.now()-t0<ms)
         if (Math.hypot(m.x-c.x, m.z-c.z) < 60) c.astNear++;
       }
       if (m.t==='damage' && typeof m.dmg === 'number') c.dmgMsgs++;
+      if (m.t==='rocket' && m.kind==='blast' && m.owner===c.id) c.blasts++;
+      if (m.t==='rocket' && m.kind==='abolt') c.abolts = (c.abolts||0) + 1;
+      if (m.t==='ammo') c.ammoMsgs.push(m);
+      if (m.t==='alienSpawn') c.aliens++;
+      if (m.t==='alienZap') c.zaps++;
+      if (m.t==='damage' && m.id===c.id && m.kind==='alien') c.alienDmg++;
     });
     return c; };
 
@@ -63,9 +69,24 @@ async function until(fn, ms, what){ const t0=Date.now(); while(Date.now()-t0<ms)
   console.log('✓ targeted asteroids: A', a.targeted, '· B', b.targeted,
               '· landing near target:', a.astNear + b.astNear);
 
+  // 4) pulse blaster: fire the magazine dry, expect blasts + an empty-mag recharge ack
+  for (let i = 0; i < S.GUN.shots + 2; i++) { a.send({t:'gun'}); await sleep(S.GUN.fireGapMs + 30); }
+  await until(()=>a.blasts >= S.GUN.shots, 4000, 'blaster bolts broadcast');
+  const empty = a.ammoMsgs.find(m => m.shots === 0 && m.rechargeAt > 0);
+  if (!empty) throw new Error('no empty-mag recharge ack received');
+  if (a.blasts > S.GUN.shots) throw new Error(`fired ${a.blasts} > magazine ${S.GUN.shots} — recharge gap not enforced`);
+  console.log('✓ blaster:', a.blasts, 'bolts then forced recharge gap (ack rechargeAt set)');
+
+  // 5) humanoid aliens spawn, open fire (abolt) or claw, and damage lands
+  await until(()=>a.aliens >= 1, 40000, 'alien spawn');
+  await until(()=>(a.abolts||0) >= 1 || a.zaps >= 1, 30000, 'alien opens fire');
+  await until(()=>a.alienDmg + b.alienDmg >= 1, 30000, 'alien damage lands');
+  console.log('✓ aliens: spawns', a.aliens, '· bolts fired', a.abolts||0,
+              '· melee swipes', a.zaps, '· alien dmg msgs', a.alienDmg + b.alienDmg);
+
   clearInterval(iv);
   console.log('✓ damage msgs carrying dmg amount:', a.dmgMsgs);
   a.ws.close(); b.ws.close();
-  console.log('MULTI-WEAPON + TARGETED ASTEROIDS OK');
+  console.log('MULTI-WEAPON + TARGETED ASTEROIDS + BLASTER + ALIENS OK');
   process.exit(0);
 })().catch(e => { console.error('FAILED:', e.message); process.exit(1); });

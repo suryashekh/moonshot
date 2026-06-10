@@ -137,6 +137,15 @@
       }
     }
 
+    // aliens (green blips)
+    if (G.alienDots) {
+      mctx.fillStyle = 'rgba(61,255,154,0.9)';
+      for (const a of G.alienDots()) {
+        const [px, py] = w2m(a.x, a.z);
+        mctx.beginPath(); mctx.arc(px, py, 2.4 * K, 0, S.TAU); mctx.fill();
+      }
+    }
+
     // remotes
     for (const r of G.remotes.values()) {
       const [px, py] = w2m(r.x, r.z);

@@ -13,6 +13,7 @@
   const elHp = $('hpfill'), elHpbar = $('hpbar'), elShield = $('shieldtag');
   const elIts = [$('it0'), $('it1'), $('it2'), $('it3'), $('it4')], elIname = $('itemname');
   const elHit = $('hitmark');
+  const elGun = $('gunbar'), elStand = $('standings');
   const elRank = $('rank'), elLap = $('lapline'), elTimers = $('timers');
   const elBest = $('rbest'), elCp = $('cpdist'), elConn = $('conn');
   const elPname = $('pname'), elFeed = $('feed'), elAlert = $('alert');
@@ -65,6 +66,42 @@
     elIname.textContent = cur
       ? cur.name + ' · Shift fire · Q/wheel swap'
       : 'NO PAYLOAD · grab a crate';
+
+    /* blaster magazine pips */
+    if (elGun) {
+      const g = G.gun, sN = G.serverNow();
+      const recharging = g.shots <= 0 && g.rechargeAt > sN;
+      if (recharging) {
+        const u = clamp(1 - (g.rechargeAt - sN) / S.GUN.rechargeMs, 0, 1);
+        elGun.innerHTML = '<span class="gunlbl">⌁ RECHARGE</span><span class="gunfill" style="width:' +
+          Math.round(u * 100) + '%"></span>';
+        elGun.classList.add('recharge');
+      } else {
+        if (g.shots <= 0) g.shots = S.GUN.shots;   // recharge elapsed
+        let pips = '';
+        for (let i = 0; i < S.GUN.shots; i++) pips += '<i class="' + (i < g.shots ? 'on' : '') + '"></i>';
+        elGun.innerHTML = '<span class="gunlbl">F BLASTER</span>' + pips;
+        elGun.classList.remove('recharge');
+      }
+    }
+
+    /* live standings (always on during race) */
+    if (elStand && (st.phase === 'countdown' || st.phase === 'race' || st.phase === 'end')) {
+      const rows = [{ rank: st.rank, name: st.myName, color: st.myColor, lap: st.lap, me: true, fin: st.finished }];
+      for (const r of G.remotes.values()) {
+        rows.push({ rank: r.rank, name: r.name, color: r.color, lap: r.lap, fin: (r.flags & S.F.FINISHED) !== 0 });
+      }
+      rows.sort((a, b) => a.rank - b.rank);
+      let html = '';
+      for (const r of rows) {
+        const hex = '#' + r.color.toString(16).padStart(6, '0');
+        html += '<div class="strow' + (r.me ? ' me' : '') + '">' +
+          '<b>' + r.rank + '</b>' +
+          '<span style="color:' + hex + '">' + r.name + (r.me ? ' ◂' : '') + '</span>' +
+          '<em>' + (r.fin ? 'FIN' : 'L' + Math.min(r.lap, S.WORLD.laps)) + '</em></div>';
+      }
+      elStand.innerHTML = html;
+    }
 
     /* race panel */
     if (st.phase === 'race' || st.phase === 'end') {
@@ -122,10 +159,10 @@
   /* attacker feedback: your weapon connected */
   const KIND_NAMES = {
     srocket: 'ROCKET', hrocket: 'HOMING RKT', mine: 'MINE', emp: 'EMP',
-    ram: 'RAM', asteroid: 'METEOR',
+    ram: 'RAM', asteroid: 'METEOR', blast: 'BLASTER', alien: 'ALIEN',
   };
   function hitConfirm(dmg, kind) {
-    elHit.textContent = '−' + dmg + '  ' + (KIND_NAMES[kind] || 'HIT');
+    elHit.textContent = (dmg ? '−' + dmg + '  ' : '✕ ') + (KIND_NAMES[kind] || 'HIT');
     elHit.classList.remove('show');
     void elHit.offsetWidth;
     elHit.classList.add('show');

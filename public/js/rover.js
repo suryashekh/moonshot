@@ -225,6 +225,7 @@
     if (e.code === 'KeyR') { if (G.net) G.net.send({ t: 'reqRespawn' }); }
     if (e.code === 'KeyL') { rig.setLights(!rig.lightsOn); }
     if (e.code === 'KeyQ') { if (G.cycleItem) G.cycleItem(1); }
+    if (e.code === 'KeyF') { if (G.fireGun) G.fireGun(); e.preventDefault(); }
     if (/^Digit[1-5]$/.test(e.code)) {
       if (G.selectItem) G.selectItem(+e.code.slice(-1) - 1);
     }
@@ -248,9 +249,9 @@
     document.getElementById('touch').classList.add('on');
     document.querySelectorAll('.tbtn').forEach((btn) => {
       const k = btn.dataset.k;
-      if (!k) {   // non-movement buttons: fire selected item / cycle slots
-        const fn = btn.id === 't-cycle'
-          ? () => { if (G.cycleItem) G.cycleItem(1); }
+      if (!k) {   // non-movement buttons: item / cycle / blaster
+        const fn = btn.id === 't-cycle' ? () => { if (G.cycleItem) G.cycleItem(1); }
+          : btn.id === 't-gun' ? () => { if (G.fireGun) G.fireGun(); }
           : () => { if (G.useItem) G.useItem(); };
         btn.addEventListener('pointerdown', (e) => { fn(); e.preventDefault(); });
         return;
@@ -308,11 +309,11 @@
     const slipT = rover.slipUntil > now;
     const zone = S.zoneAt(rover.pos.x, rover.pos.z);
 
-    // jump pads: reduced effective gravity inside the disc
-    let grav = CFG.gravity;
+    // universal GRAV WAVE first, then jump pads on top
+    let grav = CFG.gravity * (st.gravUntil > sNow ? st.gravScale : 1);
     for (const j of S.JUMP_PADS) {
       const dx = rover.pos.x - j.x, dz = rover.pos.z - j.z;
-      if (dx * dx + dz * dz < j.r * j.r) { grav = CFG.gravity * j.gscale; break; }
+      if (dx * dx + dz * dz < j.r * j.r) { grav *= j.gscale; break; }
     }
 
     // --- Input shaping (EMP slows servo response + caps throttle)

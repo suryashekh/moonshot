@@ -71,9 +71,11 @@
     document.getElementById('vitals').classList.add('show');
     document.getElementById('race').classList.add('show');
     document.getElementById('minimapPanel').classList.add('show');
+    document.getElementById('standings').classList.add('show');
   };
   G.enterLobbyView = function () {
     elLobby.classList.remove('hidden');
+    document.getElementById('standings').classList.remove('show');
     G.refreshLobby();
   };
 
@@ -163,6 +165,7 @@
       G.updateAsteroids(dt);
       G.updateCrates(dt);
       G.updateCombat(dt);
+      G.updateAliens(dt);
       G.updateHazards(dt);
       G.netTick(now);
       G.hud.update(now);

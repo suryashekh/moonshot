@@ -83,13 +83,16 @@
     repair:  { name: 'REPAIR',       tier: 0, icon: '✚'  },
     shield:  { name: 'SHIELD',       tier: 0, icon: '◉'  },
     srocket: { name: 'ROCKET',       tier: 1, icon: '➤'  },
+    tri:     { name: 'TRI-ROCKET',   tier: 1, icon: '⋔'  },
     mine:    { name: 'LUNAR MINE',   tier: 1, icon: '✱'  },
     gtrap:   { name: 'GRAV TRAP',    tier: 1, icon: '◌'  },
     gstab:   { name: 'GRAV STAB',    tier: 1, icon: '▼'  },
     hrocket: { name: 'HOMING RKT',   tier: 2, icon: '➶'  },
     emp:     { name: 'EMP PULSE',    tier: 2, icon: '⌁'  },
     decoy:   { name: 'DECOY FLARE',  tier: 2, icon: '✦'  },
+    warp:    { name: 'WARP AHEAD',   tier: 2, icon: '⇋'  },
     meteor:  { name: 'METEOR STRIKE',tier: 3, icon: '☄'  },
+    gravity: { name: 'GRAV WAVE',    tier: 3, icon: '∿'  },
   };
 
   /* Rank-aware loot table. t = 0 leader … 1 last place.
@@ -103,10 +106,13 @@
       ['mine',    1.4 - t * 0.5],
       ['gtrap',   1.3 - t * 0.4],
       ['srocket', 0.8 + t * 1.4],
+      ['tri',     0.6 + t * 0.9],
       ['hrocket', 0.15 + t * 1.5],
       ['emp',     0.15 + t * 1.1],
       ['decoy',   0.5 + t * 0.6],
+      ['warp',    0.12 + t * 0.7],
       ['meteor',  t > 0.55 ? (t - 0.55) * 1.1 : 0],
+      ['gravity', 0.07 + (t > 0.5 ? (t - 0.5) * 0.4 : 0)],
     ];
     let sum = 0; for (const e of w) sum += Math.max(e[1], 0);
     let r = rnd() * sum;
@@ -147,6 +153,33 @@
     carHitR: 2.7,           // car-vs-car collision radius
     astTargetChance: 0.75,  // odds a rock hunts a racer vs random track point
     astMinWarnMs: 2300,     // never less dodge time than this
+    triSpread: 0.16, triDmg: 22,
+    gravityMs: 11000,       // universal GRAV WAVE duration
+    gravityLow: 0.35, gravityHeavy: 1.85,
+  };
+
+  /* ---------- pulse blaster (everyone carries one) ------------- */
+  const GUN = {
+    shots: 6,            // magazine
+    fireGapMs: 240,      // min ms between shots
+    rechargeMs: 3500,    // empty → full again (the "gap")
+    speed: 70, lifeMs: 1100, hitR: 2.6, dmg: 8,
+  };
+
+  /* ---------- aliens (humanoid hostiles) ------------------------ */
+  const ALIEN = {
+    maxAlive: 3,
+    spawnMsMin: 10000, spawnMsMax: 18000,
+    lifeMs: 45000,       // gives up and leaves after this
+    hp: 30,
+    speed: 11,           // chases, but a healthy rover can outrun it
+    aggroR: 120,         // hunts the nearest racer inside this
+    attackR: 42,         // opens fire from here
+    attackMs: 1400,
+    boltSpeed: 26, boltLifeMs: 2600, dmg: 8,   // ranged bolt (dodgeable)
+    meleeR: 6, meleeDmg: 12,                    // claw swipe up close
+    hitProxR: 4.6,       // proximity fuse: your shots detonate this close
+    runOverR: 3.0, runOverSpeed: 4,  // drive over one this fast = squashed
   };
 
   /* ---------- terrain hazard zones (fixed, on the ring) -------- */
@@ -197,7 +230,7 @@
   return {
     TAU, WORLD, trackRadius, GATE_COUNT, gatePositions, gateRadius,
     CRATES, CRATE_RESPAWN_MS, CRATE_PICK_R, MAX_ITEMS,
-    ITEMS, rollItem, DMG, COMBAT, ZONES, JUMP_PADS, zoneAt,
+    ITEMS, rollItem, DMG, COMBAT, GUN, ALIEN, ZONES, JUMP_PADS, zoneAt,
     NET, PLAYER_COLORS, F, mulberry32,
   };
 });
