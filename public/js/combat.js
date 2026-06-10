@@ -30,22 +30,72 @@
       grp.add(glow);
       return grp;
     }
-    const body = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.16, 0.16, 1.1, 8),
-      new THREE.MeshStandardMaterial({
-        color: kind === 'hrocket' ? 0xff6b9e : 0xd8dde2,
-        emissive: kind === 'hrocket' ? 0xff2050 : 0xff8030,
-        emissiveIntensity: 0.8, metalness: 0.6, roughness: 0.4,
-      })
+    // classic finned missile: lathe body with bulge, accent nose cone,
+    // porthole, 4 swept tail fins (built in Y-up frame, rotated to +Z)
+    const accent = kind === 'hrocket' ? 0xff4060 : 0xffb347;
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: 0xeef1f4, metalness: 0.35, roughness: 0.35,
+      emissive: 0x404850, emissiveIntensity: 0.35,
+    });
+    const accMat = new THREE.MeshStandardMaterial({
+      color: accent, metalness: 0.4, roughness: 0.4,
+      emissive: accent, emissiveIntensity: 0.5,
+    });
+    const rocket = new THREE.Group();
+
+    const profile = [];
+    for (const [r, y] of [[0.13, 0], [0.19, 0.18], [0.215, 0.5], [0.19, 0.85], [0.12, 1.1], [0.0, 1.5]]) {
+      profile.push(new THREE.Vector2(r, y));
+    }
+    const body = new THREE.Mesh(new THREE.LatheGeometry(profile, 14), bodyMat);
+    body.castShadow = true;
+    rocket.add(body);
+
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.125, 0.42, 14), accMat);
+    nose.position.y = 1.3;
+    rocket.add(nose);
+
+    // porthole on the flank
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.025, 8, 16), accMat);
+    rim.rotation.y = Math.PI / 2;
+    rim.position.set(0.21, 0.62, 0);
+    rocket.add(rim);
+    const glass = new THREE.Mesh(
+      new THREE.CircleGeometry(0.08, 12),
+      new THREE.MeshBasicMaterial({ color: 0x16202b })
     );
-    body.rotation.x = Math.PI / 2;     // axis → +Z (forward)
-    grp.add(body);
+    glass.rotation.y = Math.PI / 2;
+    glass.position.set(0.215, 0.62, 0);
+    rocket.add(glass);
+
+    // 4 swept-back fins
+    const finShape = new THREE.Shape();
+    finShape.moveTo(0, 0);
+    finShape.lineTo(0.3, -0.2);
+    finShape.lineTo(0.3, 0.1);
+    finShape.lineTo(0, 0.42);
+    finShape.closePath();
+    const finGeo = new THREE.ExtrudeGeometry(finShape, { depth: 0.045, bevelEnabled: false });
+    for (let i = 0; i < 4; i++) {
+      const pivot = new THREE.Group();
+      pivot.rotation.y = i * Math.PI / 2;
+      const fin = new THREE.Mesh(finGeo, accMat);
+      fin.position.set(0.13, 0.02, -0.022);
+      fin.castShadow = true;
+      pivot.add(fin);
+      rocket.add(pivot);
+    }
+
+    rocket.rotation.x = Math.PI / 2;   // nose → +Z (forward)
+    rocket.position.z = -0.75;
+    grp.add(rocket);
+
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({
       map: G.glowTex, color: kind === 'hrocket' ? 0xff5070 : 0xffb060,
       transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
     }));
     glow.scale.setScalar(2.4);
-    glow.position.z = -0.7;
+    glow.position.z = -0.85;
     grp.add(glow);
     return grp;
   }
