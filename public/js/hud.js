@@ -86,7 +86,7 @@
     }
 
     /* live standings (always on during race) */
-    if (elStand && (st.phase === 'race' || st.phase === 'end')) {
+    if (elStand && (st.phase === 'countdown' || st.phase === 'race' || st.phase === 'end')) {
       const rows = [{ rank: st.rank, name: st.myName, color: st.myColor, lap: st.lap, me: true, fin: st.finished }];
       for (const r of G.remotes.values()) {
         rows.push({ rank: r.rank, name: r.name, color: r.color, lap: r.lap, fin: (r.flags & S.F.FINISHED) !== 0 });

@@ -148,6 +148,7 @@
         st.shieldUntil = st.empUntil = st.boostUntil = st.gstabUntil = 0;
         st.deadUntil = st.invulnUntil = 0;
         G.clearAsteroids(); G.clearCombat();
+        if (m.crates) G.setCrateItems(m.crates);
         G.hideEndScreen();
         G.enterGameView();
         break;

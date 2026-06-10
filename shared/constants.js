@@ -166,15 +166,18 @@
     speed: 70, lifeMs: 1100, hitR: 2.0, dmg: 8,
   };
 
-  /* ---------- aliens -------------------------------------------- */
+  /* ---------- aliens (humanoid hostiles) ------------------------ */
   const ALIEN = {
     maxAlive: 3,
-    spawnMsMin: 11000, spawnMsMax: 20000,
-    lifeMs: 50000,       // gives up and leaves after this
-    hp: 24,
-    speed: 10.5,
-    aggroR: 80,          // hunts the nearest racer inside this
-    attackR: 13, attackMs: 1700, dmg: 7,
+    spawnMsMin: 10000, spawnMsMax: 18000,
+    lifeMs: 45000,       // gives up and leaves after this
+    hp: 30,
+    speed: 16,           // sprints after you
+    aggroR: 120,         // hunts the nearest racer inside this
+    attackR: 42,         // opens fire from here
+    attackMs: 1400,
+    boltSpeed: 26, boltLifeMs: 2600, dmg: 8,   // ranged bolt (dodgeable)
+    meleeR: 6, meleeDmg: 12,                    // claw swipe up close
   };
 
   /* ---------- terrain hazard zones (fixed, on the ring) -------- */

@@ -91,7 +91,10 @@ class Room {
     this.nextAlienAt = 0;
     this.gravUntil = 0;            // universal GRAV WAVE
     this.gravScale = 1;
-    this.crates = S.CRATES.map(c => ({ id: c.id, x: c.x, z: c.z, up: true, respawnAt: 0 }));
+    this.crates = S.CRATES.map(c => ({
+      id: c.id, x: c.x, z: c.z, up: true, respawnAt: 0,
+      item: S.rollItem(0.5, this.rng),     // pre-rolled & visible: players choose what to grab
+    }));
     this.raceStartTs = 0;
     this.nextAsteroidAt = 0;
     this.nextShowerAt = 0;
@@ -161,7 +164,7 @@ class Room {
     this.traps.length = 0; this.asteroids.length = 0;
     this.aliens.length = 0;
     this.gravUntil = 0; this.gravScale = 1;
-    for (const c of this.crates) { c.up = true; c.respawnAt = 0; }
+    for (const c of this.crates) { c.up = true; c.respawnAt = 0; c.item = S.rollItem(0.5, this.rng); }
     let i = 0;
     for (const p of this.players.values()) {
       p.lap = 1; p.nextGate = 0; p.gatesPassed = 0; p.bestLap = 0;
@@ -171,7 +174,11 @@ class Room {
       p.deadUntil = 0; p.invulnUntil = 0; p.startIdx = i++;
     }
     this.firstFinishTs = 0;
-    this.broadcast({ t: 'raceSetup', startGrid: [...this.players.values()].map(p => ({ id: p.id, slot: p.startIdx })) });
+    this.broadcast({
+      t: 'raceSetup',
+      startGrid: [...this.players.values()].map(p => ({ id: p.id, slot: p.startIdx })),
+      crates: this.crates.map(c => ({ id: c.id, item: c.item })),
+    });
     // 3‑2‑1‑GO
     let n = 3;
     const step = () => {
@@ -514,19 +521,20 @@ class Room {
     send(p.ws, { t: 'ammo', shots: p.gunShots, rechargeAt: p.gunShots <= 0 ? p.gunRechargeAt : 0 });
   }
 
-  /* ----- aliens ----- */
+  /* ----- aliens (humanoid hostiles) ----- */
   spawnAlien() {
     const t = now();
     const alive = [...this.players.values()].filter(p => !p.finished && p.deadUntil < t);
     if (!alive.length) return;
-    // materialize ahead of a random racer, just off the racing line
+    // drop in right ahead of a random racer so it engages immediately
     const p = alive[(this.rng() * alive.length) | 0];
-    const a = (Math.atan2(p.z, p.x) + 0.25 + this.rng() * 0.25 + S.TAU) % S.TAU;
-    const r = S.trackRadius(a) + (this.rng() * 2 - 1) * 20;
+    const ahead = 38 + this.rng() * 18;
+    const lat = (this.rng() * 2 - 1) * 12;
     const al = {
       id: nextEntityId++,
-      x: Math.cos(a) * r, z: Math.sin(a) * r,
-      hp: S.ALIEN.hp, dieAt: t + S.ALIEN.lifeMs, nextAttackAt: 0,
+      x: p.x + Math.sin(p.yaw) * ahead + Math.cos(p.yaw) * lat,
+      z: p.z + Math.cos(p.yaw) * ahead - Math.sin(p.yaw) * lat,
+      hp: S.ALIEN.hp, dieAt: t + S.ALIEN.lifeMs, nextAttackAt: t + 900,
       wanderA: this.rng() * S.TAU,
     };
     this.aliens.push(al);
@@ -567,14 +575,33 @@ class Room {
       }
       if (prey) {
         const d = Math.sqrt(best) || 1;
-        if (d > S.ALIEN.attackR * 0.6) {
+        // sprint at the prey, stop circling at point-blank
+        if (d > S.ALIEN.meleeR * 0.8) {
           al.x += ((prey.x - al.x) / d) * S.ALIEN.speed * dt;
           al.z += ((prey.z - al.z) / d) * S.ALIEN.speed * dt;
         }
-        if (d < S.ALIEN.attackR && t >= al.nextAttackAt) {
-          al.nextAttackAt = t + S.ALIEN.attackMs;
-          this.broadcast({ t: 'alienZap', id: al.id, target: prey.id });
-          this.applyDamage(prey, S.ALIEN.dmg, 'alien', 0, { kx: prey.x - al.x, kz: prey.z - al.z, mag: 3 });
+        if (t >= al.nextAttackAt) {
+          if (d < S.ALIEN.meleeR) {
+            // claw swipe
+            al.nextAttackAt = t + S.ALIEN.attackMs;
+            this.broadcast({ t: 'alienZap', id: al.id, target: prey.id, melee: true });
+            this.applyDamage(prey, S.ALIEN.meleeDmg, 'alien', 0, { kx: prey.x - al.x, kz: prey.z - al.z, mag: 5, spin: 1 });
+          } else if (d < S.ALIEN.attackR) {
+            // ranged bolt, aimed with velocity lead — dodgeable by swerving
+            al.nextAttackAt = t + S.ALIEN.attackMs + this.rng() * 400;
+            const tt = d / S.ALIEN.boltSpeed;
+            const ax = prey.x + Math.sin(prey.yaw) * prey.vf * tt * 0.85;
+            const az = prey.z + Math.cos(prey.yaw) * prey.vf * tt * 0.85;
+            const yaw = Math.atan2(ax - al.x, az - al.z);
+            const r = {
+              id: nextEntityId++, kind: 'abolt', owner: 0, alien: al.id,
+              x: al.x + Math.sin(yaw) * 1.4, z: al.z + Math.cos(yaw) * 1.4,
+              yaw, speed: S.ALIEN.boltSpeed,
+              dieAt: t + S.ALIEN.boltLifeMs, target: 0, decoyed: false, dmg: S.ALIEN.dmg,
+            };
+            this.projectiles.push(r);
+            this.broadcast({ t: 'rocket', id: r.id, kind: 'abolt', owner: 0, x: r.x, z: r.z, yaw: r.yaw, speed: r.speed });
+          }
         }
       } else {
         // idle drift along the ring
@@ -624,9 +651,9 @@ class Room {
       r.x += Math.sin(r.yaw) * r.speed * dt;
       r.z += Math.cos(r.yaw) * r.speed * dt;
 
-      // hit aliens (every projectile kind hurts them)
+      // hit aliens (every player-fired projectile hurts them)
       let alHit = false;
-      for (const al of this.aliens) {
+      if (r.kind !== 'abolt') for (const al of this.aliens) {
         if (dist2(r.x, r.z, al.x, al.z) < 3.4 * 3.4) {
           this.broadcast({ t: 'rocketBoom', id: r.id, x: r.x, z: r.z, victim: 0 });
           this.hurtAlien(al, r.dmg || (r.kind === 'hrocket' ? S.DMG.hrocket : S.DMG.srocket), r.owner);
@@ -733,16 +760,19 @@ class Room {
     /* crates: pickups + respawn */
     for (const c of this.crates) {
       if (!c.up) {
-        if (t >= c.respawnAt) { c.up = true; this.broadcast({ t: 'crateUp', id: c.id }); }
+        if (t >= c.respawnAt) {
+          c.up = true;
+          c.item = S.rollItem(0.5, this.rng);   // fresh roll, advertised to all
+          this.broadcast({ t: 'crateUp', id: c.id, item: c.item });
+        }
         continue;
       }
       for (const p of this.players.values()) {
         if (p.items.length >= S.MAX_ITEMS || p.finished || p.deadUntil > t) continue;
         if (dist2(c.x, c.z, p.x, p.z) < S.CRATE_PICK_R * S.CRATE_PICK_R) {
           c.up = false; c.respawnAt = t + S.CRATE_RESPAWN_MS;
-          const item = S.rollItem(this.rankT(p), this.rng);
-          p.items.push(item);
-          this.broadcast({ t: 'crateTaken', id: c.id, by: p.id, item });
+          p.items.push(c.item);
+          this.broadcast({ t: 'crateTaken', id: c.id, by: p.id, item: c.item });
           break;
         }
       }
@@ -827,9 +857,11 @@ class Room {
     this.broadcast({ t: 'rocketBoom', id: r.id, x, z, victim: victim ? victim.id : 0 });
     if (victim) {
       const dmg = r.dmg || (r.kind === 'hrocket' ? S.DMG.hrocket : S.DMG.srocket);
-      this.applyDamage(victim, dmg, r.kind, r.owner, {
+      const kind = r.kind === 'abolt' ? 'alien' : r.kind;   // shields soak alien fire
+      this.applyDamage(victim, dmg, kind, r.owner, {
         kx: victim.x - (r.x - Math.sin(r.yaw)), kz: victim.z - (r.z - Math.cos(r.yaw)),
-        mag: r.kind === 'blast' ? 3 : 10, spin: r.kind === 'blast' ? 0 : 1,
+        mag: (r.kind === 'blast' || r.kind === 'abolt') ? 3 : 10,
+        spin: (r.kind === 'blast' || r.kind === 'abolt') ? 0 : 1,
       });
     }
   }
@@ -970,7 +1002,7 @@ function joinPayload(room, p, rejoined) {
     hostId: room.hostId, state: room.state, rejoined: !!rejoined,
     serverNow: now(),
     urls: lanIPs().map(ip => `http://${ip}:${PORT}`),
-    crates: room.crates.map(c => ({ id: c.id, up: c.up })),
+    crates: room.crates.map(c => ({ id: c.id, up: c.up, item: c.item })),
     myItems: p.items.slice(),
   };
 }

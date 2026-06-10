@@ -14,15 +14,16 @@
 
   function makeRocketMesh(kind) {
     const grp = new THREE.Group();
-    if (kind === 'blast') {        // pulse-blaster bolt: short cyan tracer
+    if (kind === 'blast' || kind === 'abolt') {   // tracer bolt: cyan (mine) / green (alien)
+      const col = kind === 'abolt' ? 0x4dff8f : 0x8df3ff;
       const bolt = new THREE.Mesh(
         new THREE.CylinderGeometry(0.09, 0.09, 1.6, 6),
-        new THREE.MeshBasicMaterial({ color: 0x8df3ff })
+        new THREE.MeshBasicMaterial({ color: col })
       );
       bolt.rotation.x = Math.PI / 2;
       grp.add(bolt);
       const glow = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: G.glowTex, color: 0x55e8ff,
+        map: G.glowTex, color: col,
         transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
       }));
       glow.scale.setScalar(1.6);
@@ -54,6 +55,7 @@
     G.scene.add(mesh);
     rockets.set(m.id, { mesh, x: m.x, z: m.z, yaw: m.yaw, speed: m.speed, kind: m.kind });
     if (m.kind === 'blast') G.beep(1300, 60, 'square', 0.045);
+    else if (m.kind === 'abolt') G.beep(700, 110, 'sawtooth', 0.05);
     else G.beep(m.kind === 'hrocket' ? 220 : 180, 180, 'sawtooth', 0.06);
   };
 
@@ -117,8 +119,8 @@
       const y = G.terrainHeight(r.x, r.z) + 1.4;
       r.mesh.position.set(r.x, y, r.z);
       r.mesh.rotation.y = r.yaw;
-      // exhaust (blaster bolts fly clean)
-      if (r.kind !== 'blast' && Math.random() < dt * 40) {
+      // exhaust (tracer bolts fly clean)
+      if (r.kind !== 'blast' && r.kind !== 'abolt' && Math.random() < dt * 40) {
         G.spawnDust(r.x - Math.sin(r.yaw) * 0.8, y, r.z - Math.cos(r.yaw) * 0.8,
           (Math.random() - 0.5) * 1.5, 0.5 + Math.random(), (Math.random() - 0.5) * 1.5,
           0.14, 0.6, 0.55, -1000);

@@ -1,48 +1,92 @@
 /* ================================================================
-   ALIENS — client visuals for server-driven alien hunters.
-   Saucer rig (dome + hull ring + green glow), positions lerped
-   toward the 15 Hz snapshot stream, hover bob, zap beam when one
-   attacks, pop + bounty feed on death. All behavior is server-
-   authoritative; this module only renders.
+   ALIENS — client visuals for server-driven humanoid hostiles.
+   Biped rig (glowing head, suit, rifle) that runs on the terrain,
+   positions lerped toward the 15 Hz snapshot stream, leg-swing run
+   cycle, faces its prey, claw-swipe beam on melee, pop + bounty
+   feed on death. All behavior is server-authoritative; this module
+   only renders.
    ================================================================ */
 (function () {
   const S = SHARED, lerp = G.lerp;
-  const aliens = new Map();   // id -> { grp, dome, glow, x, z, tx, tz, hp, ph }
+  const aliens = new Map();   // id -> { grp, head, legs, arms, glow, x, z, tx, tz, yaw, hp, ph, runPh }
 
-  function makeSaucer() {
+  function makeAlienRig() {
     const grp = new THREE.Group();
-    const hull = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.7, 1.1, 0.5, 18),
-      new THREE.MeshStandardMaterial({ color: 0x49545e, metalness: 0.85, roughness: 0.35 })
+    const suit = new THREE.MeshStandardMaterial({ color: 0x3c4a42, metalness: 0.5, roughness: 0.55 });
+    const skin = new THREE.MeshStandardMaterial({
+      color: 0x49e88f, emissive: 0x1ec46a, emissiveIntensity: 1.4,
+      metalness: 0.2, roughness: 0.4,
+    });
+
+    // legs (pivot at hip so they can swing)
+    const legs = [];
+    for (const sx of [-0.16, 0.16]) {
+      const hip = new THREE.Group();
+      hip.position.set(sx, 0.78, 0);
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.07, 0.74, 8), suit);
+      leg.position.y = -0.37;
+      leg.castShadow = true;
+      hip.add(leg);
+      grp.add(hip);
+      legs.push(hip);
+    }
+    // torso
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.62, 0.3), suit);
+    torso.position.y = 1.1; torso.castShadow = true;
+    grp.add(torso);
+    // arms
+    const arms = [];
+    for (const sx of [-0.34, 0.34]) {
+      const sh = new THREE.Group();
+      sh.position.set(sx, 1.34, 0);
+      const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.05, 0.58, 8), suit);
+      arm.position.y = -0.29;
+      arm.castShadow = true;
+      sh.add(arm);
+      grp.add(sh);
+      arms.push(sh);
+    }
+    // rifle in the right hand, pointing forward
+    const rifle = new THREE.Mesh(
+      new THREE.BoxGeometry(0.09, 0.09, 0.62),
+      new THREE.MeshStandardMaterial({ color: 0x222a26, metalness: 0.8, roughness: 0.3 })
     );
-    grp.add(hull);
-    const dome = new THREE.Mesh(
-      new THREE.SphereGeometry(0.85, 16, 10, 0, S.TAU, 0, Math.PI / 2),
-      new THREE.MeshStandardMaterial({
-        color: 0x2dff8f, emissive: 0x18c45f, emissiveIntensity: 1.6,
-        transparent: true, opacity: 0.85, metalness: 0.2, roughness: 0.25,
-      })
-    );
-    dome.position.y = 0.22;
-    grp.add(dome);
+    rifle.position.set(0.34, 0.82, 0.28);
+    grp.add(rifle);
+    // oversized glowing head — the kill-me sign
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 14, 12), skin);
+    head.scale.y = 1.25;
+    head.position.y = 1.78;
+    head.castShadow = true;
+    grp.add(head);
+    // black almond eyes
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0x0a0f0c });
+    for (const sx of [-0.1, 0.1]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), eyeMat);
+      eye.scale.set(1, 1.5, 0.5);
+      eye.position.set(sx, 1.82, 0.22);
+      grp.add(eye);
+    }
     const glow = new THREE.Sprite(new THREE.SpriteMaterial({
       map: G.glowTex, color: 0x3dff9a, transparent: true,
-      blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.8,
+      blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.7,
     }));
-    glow.scale.setScalar(6);
+    glow.scale.setScalar(4);
+    glow.position.y = 1.78;
     grp.add(glow);
-    return { grp, dome, glow };
+    return { grp, head, legs, arms, glow };
   }
 
   G.onAlienSpawn = function (m) {
-    const rig = makeSaucer();
-    rig.grp.position.set(m.x, G.terrainHeight(m.x, m.z) + 3.2, m.z);
+    const rig = makeAlienRig();
+    rig.grp.position.set(m.x, G.terrainHeight(m.x, m.z), m.z);
     G.scene.add(rig.grp);
+    G.dustBurst(m.x, G.terrainHeight(m.x, m.z), m.z, 5);   // drop-pod puff
     aliens.set(m.id, {
-      ...rig, x: m.x, z: m.z, tx: m.x, tz: m.z,
-      hp: m.hp, ph: Math.random() * S.TAU,
+      ...rig, x: m.x, z: m.z, tx: m.x, tz: m.z, yaw: 0,
+      hp: m.hp, ph: Math.random() * S.TAU, runPh: 0,
     });
-    if (G.hud) G.hud.feed('👽 alien inbound — blast it (F)');
+    if (G.hud) G.hud.feed('👽 hostile alien dropped in — kill it (F)');
     G.beep(180, 300, 'sawtooth', 0.06);
     G.beep(240, 300, 'sine', 0.05);
   };
@@ -92,14 +136,14 @@
 
   G.onAlienGone = function (m) { removeAlien(m.id); };
 
-  /* zap beam: alien → target, fades fast */
+  /* melee claw-swipe beam: alien → target, fades fast */
   const beams = [];
   G.onAlienZap = function (m) {
     const a = aliens.get(m.id);
     if (!a) return;
     const tgt = m.target === G.state.myId ? G.rover.pos : G.remotes.get(m.target);
     if (!tgt) return;
-    const y0 = G.terrainHeight(a.x, a.z) + 3.2;
+    const y0 = G.terrainHeight(a.x, a.z) + 1.5;
     const y1 = (m.target === G.state.myId ? tgt.y : G.terrainHeight(tgt.x, tgt.z)) + 1.0;
     const geo = new THREE.BufferGeometry().setFromPoints([
       new THREE.Vector3(a.x, y0, a.z),
@@ -125,14 +169,31 @@
     const t = performance.now() * 0.001;
     const k = 1 - Math.exp(-8 * dt);
     for (const a of aliens.values()) {
+      const px = a.x, pz = a.z;
       a.x = lerp(a.x, a.tx, k);
       a.z = lerp(a.z, a.tz, k);
-      const y = G.terrainHeight(a.x, a.z) + 3.2 + Math.sin(t * 2.2 + a.ph) * 0.5;
-      a.grp.position.set(a.x, y, a.z);
-      a.grp.rotation.y += 0.8 * dt;
-      a.glow.material.opacity = 0.55 + 0.3 * Math.sin(t * 5 + a.ph);
+      a.grp.position.set(a.x, G.terrainHeight(a.x, a.z), a.z);
+
+      // face the direction of travel; run cycle scales with speed
+      const dx = a.x - px, dz = a.z - pz;
+      const sp = Math.hypot(dx, dz) / Math.max(dt, 1e-3);
+      if (sp > 0.5) {
+        const want = Math.atan2(dx, dz);
+        let dy = want - a.yaw;
+        while (dy > Math.PI) dy -= S.TAU; while (dy < -Math.PI) dy += S.TAU;
+        a.yaw += dy * Math.min(10 * dt, 1);
+        a.grp.rotation.y = a.yaw;
+      }
+      a.runPh += Math.min(sp, S.ALIEN.speed) * 0.6 * dt;
+      const swing = sp > 0.5 ? Math.sin(a.runPh * 6) * 0.6 : 0;
+      a.legs[0].rotation.x = swing;
+      a.legs[1].rotation.x = -swing;
+      a.arms[0].rotation.x = -swing * 0.7;
+      a.arms[1].rotation.x = swing * 0.7;
+
+      a.glow.material.opacity = 0.5 + 0.25 * Math.sin(t * 5 + a.ph);
       // hurt aliens flicker
-      if (a.hp < S.ALIEN.hp * 0.5) a.dome.material.emissiveIntensity = 1 + Math.sin(t * 18) * 0.8;
+      if (a.hp < S.ALIEN.hp * 0.5) a.head.material.emissiveIntensity = 1 + Math.sin(t * 18) * 0.8;
     }
     for (let i = beams.length - 1; i >= 0; i--) {
       const b = beams[i];

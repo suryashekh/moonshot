@@ -7,7 +7,44 @@
    ================================================================ */
 (function () {
   const S = SHARED;
-  const crates = new Map();   // id -> { grp, core, glow, up, x, z, gy }
+  const crates = new Map();   // id -> { grp, core, glow, icon, up, item, x, z, gy }
+
+  // tier colors: common cyan / uncommon green / rare pink / legendary gold
+  const TIER_COL = [0x9adfff, 0x7dff7a, 0xff6b9e, 0xffd76b];
+
+  // floating sign: the item's icon glyph rendered to a canvas sprite
+  function makeIconSprite() {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 128;
+    const tex = new THREE.CanvasTexture(cv);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: tex, transparent: true, depthWrite: false,
+    }));
+    sp.scale.set(3.4, 3.4, 1);
+    sp.position.y = 4.6;
+    return { sp, cv, tex };
+  }
+
+  function paintIcon(o, item) {
+    const it = S.ITEMS[item];
+    if (!it) return;
+    const g = o.icon.cv.getContext('2d');
+    g.clearRect(0, 0, 128, 128);
+    const hex = '#' + TIER_COL[it.tier].toString(16).padStart(6, '0');
+    g.shadowColor = hex; g.shadowBlur = 18;
+    g.fillStyle = hex;
+    g.font = '700 64px "Segoe UI Symbol", system-ui, sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(it.icon, 64, 56);
+    g.shadowBlur = 0;
+    g.font = '700 17px "Segoe UI", system-ui, sans-serif';
+    g.fillText(it.name, 64, 108);
+    o.icon.tex.needsUpdate = true;
+    // tint the pod to the tier color too
+    o.core.material.color.setHex(TIER_COL[it.tier]);
+    o.core.material.emissive.setHex(TIER_COL[it.tier]);
+    o.glow.material.color.setHex(TIER_COL[it.tier]);
+  }
 
   (function build() {
     for (const c of S.CRATES) {
@@ -43,15 +80,28 @@
       beam.position.y = 13;
       grp.add(beam);
 
+      const icon = makeIconSprite();
+      grp.add(icon.sp);
+
       G.scene.add(grp);
-      crates.set(c.id, { grp, core, glow, up: true, x: c.x, z: c.z, gy, ph: Math.random() * S.TAU });
+      crates.set(c.id, { grp, core, glow, icon, up: true, item: null, x: c.x, z: c.z, gy, ph: Math.random() * S.TAU });
     }
   })();
 
   G.setCrates = function (list) {     // from joined payload
     for (const c of list) {
       const o = crates.get(c.id);
-      if (o) { o.up = c.up; o.grp.visible = c.up; }
+      if (o) {
+        o.up = c.up; o.grp.visible = c.up;
+        if (c.item) { o.item = c.item; paintIcon(o, c.item); }
+      }
+    }
+  };
+
+  G.setCrateItems = function (list) { // from raceSetup: fresh rolls for every pod
+    for (const c of list) {
+      const o = crates.get(c.id);
+      if (o) { o.item = c.item; paintIcon(o, c.item); }
     }
   };
 
@@ -73,7 +123,10 @@
 
   G.onCrateUp = function (m) {
     const o = crates.get(m.id);
-    if (o) { o.up = true; o.grp.visible = true; }
+    if (o) {
+      o.up = true; o.grp.visible = true;
+      if (m.item) { o.item = m.item; paintIcon(o, m.item); }
+    }
   };
 
   /* item use → just tell the server; it validates cooldown + inventory */
