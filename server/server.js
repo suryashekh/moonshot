@@ -54,6 +54,16 @@ const httpServer = http.createServer((req, res) => {
 const now = () => Date.now();
 const clamp = (v, a, b) => v < a ? a : (v > b ? b : v);
 const dist2 = (ax, az, bx, bz) => { const dx = ax - bx, dz = az - bz; return dx * dx + dz * dz; };
+// squared distance from point (px,pz) to segment (x0,z0)→(x1,z1):
+// lets fast projectiles hit anything near their PATH this tick (no tunneling)
+function segDist2(x0, z0, x1, z1, px, pz) {
+  const dx = x1 - x0, dz = z1 - z0;
+  const len2 = dx * dx + dz * dz;
+  if (len2 < 1e-9) return dist2(x0, z0, px, pz);
+  let u = ((px - x0) * dx + (pz - z0) * dz) / len2;
+  u = u < 0 ? 0 : (u > 1 ? 1 : u);
+  return dist2(x0 + dx * u, z0 + dz * u, px, pz);
+}
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 function makeCode() {
   let c = '';
@@ -566,6 +576,19 @@ class Room {
         this.broadcast({ t: 'alienGone', id: al.id });
         continue;
       }
+      // run over by a moving rover? squashed — bounty to the driver
+      let squashed = false;
+      for (const p of this.players.values()) {
+        if (p.finished || p.deadUntil > t) continue;
+        if (Math.abs(p.vf) >= S.ALIEN.runOverSpeed &&
+            dist2(al.x, al.z, p.x, p.z) < S.ALIEN.runOverR * S.ALIEN.runOverR) {
+          this.hurtAlien(al, al.hp, p.id);
+          squashed = true;
+          break;
+        }
+      }
+      if (squashed) continue;
+
       // hunt the nearest living racer in aggro range
       let prey = null, best = S.ALIEN.aggroR * S.ALIEN.aggroR;
       for (const p of this.players.values()) {
@@ -648,14 +671,15 @@ class Room {
         }
         if (r.decoyed && dist2(r.x, r.z, r.dx, r.dz) < 9) { this.boomRocket(r, null); this.projectiles.splice(i, 1); continue; }
       }
+      const px = r.x, pz = r.z;          // path start for swept hit tests
       r.x += Math.sin(r.yaw) * r.speed * dt;
       r.z += Math.cos(r.yaw) * r.speed * dt;
 
-      // hit aliens (every player-fired projectile hurts them)
+      // hit aliens — proximity fuse along the flight path this tick
       let alHit = false;
       if (r.kind !== 'abolt') for (const al of this.aliens) {
-        if (dist2(r.x, r.z, al.x, al.z) < 3.4 * 3.4) {
-          this.broadcast({ t: 'rocketBoom', id: r.id, x: r.x, z: r.z, victim: 0 });
+        if (segDist2(px, pz, r.x, r.z, al.x, al.z) < S.ALIEN.hitProxR * S.ALIEN.hitProxR) {
+          this.broadcast({ t: 'rocketBoom', id: r.id, x: al.x, z: al.z, victim: 0 });
           this.hurtAlien(al, r.dmg || (r.kind === 'hrocket' ? S.DMG.hrocket : S.DMG.srocket), r.owner);
           alHit = true;
           break;
@@ -663,13 +687,13 @@ class Room {
       }
       if (alHit) { this.projectiles.splice(i, 1); continue; }
 
-      // hit players
+      // hit players — swept along the path so fast bolts can't tunnel through
       const hitR = r.kind === 'hrocket' ? S.COMBAT.hrocketHitR
         : r.kind === 'blast' ? S.GUN.hitR : S.COMBAT.srocketHitR;
       let hit = null;
       for (const q of this.players.values()) {
         if (q.id === r.owner || q.finished || q.deadUntil > t || q.invulnUntil > t) continue;
-        if (dist2(r.x, r.z, q.x, q.z) < hitR * hitR) { hit = q; break; }
+        if (segDist2(px, pz, r.x, r.z, q.x, q.z) < hitR * hitR) { hit = q; break; }
       }
       // straight rockets can shoot down incoming asteroids
       if (!hit && r.kind === 'srocket') {

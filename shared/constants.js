@@ -163,7 +163,7 @@
     shots: 6,            // magazine
     fireGapMs: 240,      // min ms between shots
     rechargeMs: 3500,    // empty → full again (the "gap")
-    speed: 70, lifeMs: 1100, hitR: 2.0, dmg: 8,
+    speed: 70, lifeMs: 1100, hitR: 2.6, dmg: 8,
   };
 
   /* ---------- aliens (humanoid hostiles) ------------------------ */
@@ -172,12 +172,14 @@
     spawnMsMin: 10000, spawnMsMax: 18000,
     lifeMs: 45000,       // gives up and leaves after this
     hp: 30,
-    speed: 16,           // sprints after you
+    speed: 11,           // chases, but a healthy rover can outrun it
     aggroR: 120,         // hunts the nearest racer inside this
     attackR: 42,         // opens fire from here
     attackMs: 1400,
     boltSpeed: 26, boltLifeMs: 2600, dmg: 8,   // ranged bolt (dodgeable)
     meleeR: 6, meleeDmg: 12,                    // claw swipe up close
+    hitProxR: 4.6,       // proximity fuse: your shots detonate this close
+    runOverR: 3.0, runOverSpeed: 4,  // drive over one this fast = squashed
   };
 
   /* ---------- terrain hazard zones (fixed, on the ring) -------- */
