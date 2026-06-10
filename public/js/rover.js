@@ -19,10 +19,77 @@
   const MODEL_YAW        = Math.PI / 2; // model length runs along X; rotate 90° to face +Z (forward).
                                         // If it drives backward, flip to -Math.PI / 2.
   const MODEL_Y_OFFSET   = 0;          // nudge up/down if wheels float / sink after auto-fit
+  const WHEEL_MAT_NAME   = 'Wheels';   // GLB material whose meshes are split into 4 turning wheels
+  const ACCENT_MAT_NAMES = ['Chassis'];// GLB material(s) tinted to the player's color
+  const WHEEL_ROLL_SIGN  = 1;          // flip to -1 if wheels spin backwards while driving forward
+  G.WHEEL_ROLL_SIGN = WHEEL_ROLL_SIGN; // remote.js reads this so both ends roll the same way
 
   let _modelProto = null;         // normalized THREE.Group, cloned per rig
   let _modelFailed = false;
   const _pendingRigs = [];        // rigs built before the model finished loading
+
+  // The GLB packs all four wheels into a few full-width meshes (one per part:
+  // tyre/rim/hub). Split that geometry into 4 corner buckets by vertex sign, and
+  // re-home each as steer-pivot ▸ spin ▸ mesh so wheels can roll and the front
+  // pair can steer — exactly like the old procedural rig. Runs once on the proto.
+  function splitWheels(root) {
+    root.updateMatrixWorld(true);
+    const rootInv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+    const wheelMeshes = [];
+    root.traverse((o) => {
+      if (o.isMesh && o.material && o.material.name === WHEEL_MAT_NAME) wheelMeshes.push(o);
+    });
+    if (!wheelMeshes.length) { console.warn('[rover] no "' + WHEEL_MAT_NAME + '" meshes — wheels won\'t turn'); return; }
+
+    const wheelMat = wheelMeshes[0].material;
+    const buckets = {};   // key 'F|B' + 'P|N' -> {pos:[], nrm:[], uv:[]}
+    const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3();
+    const nrmMat = new THREE.Matrix3();
+
+    for (const mesh of wheelMeshes) {
+      const Mlocal = new THREE.Matrix4().multiplyMatrices(rootInv, mesh.matrixWorld);
+      nrmMat.getNormalMatrix(Mlocal);
+      const geo = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry;
+      const pos = geo.attributes.position, nrm = geo.attributes.normal, uv = geo.attributes.uv;
+      for (let t = 0; t < pos.count; t += 3) {
+        vA.fromBufferAttribute(pos, t).applyMatrix4(Mlocal);
+        vB.fromBufferAttribute(pos, t + 1).applyMatrix4(Mlocal);
+        vC.fromBufferAttribute(pos, t + 2).applyMatrix4(Mlocal);
+        const cx = (vA.x + vB.x + vC.x) / 3, cz = (vA.z + vB.z + vC.z) / 3;
+        const key = (cx >= 0 ? 'F' : 'B') + (cz >= 0 ? 'P' : 'N');
+        const b = buckets[key] || (buckets[key] = { pos: [], nrm: [], uv: [] });
+        for (let v = 0; v < 3; v++) {
+          const src = v === 0 ? vA : (v === 1 ? vB : vC);
+          b.pos.push(src.x, src.y, src.z);
+          const nx = nrm.getX(t + v), ny = nrm.getY(t + v), nz = nrm.getZ(t + v);
+          const n = new THREE.Vector3(nx, ny, nz).applyMatrix3(nrmMat).normalize();
+          b.nrm.push(n.x, n.y, n.z);
+          if (uv) b.uv.push(uv.getX(t + v), uv.getY(t + v));
+        }
+      }
+    }
+    for (const mesh of wheelMeshes) mesh.parent && mesh.parent.remove(mesh);
+
+    // Build one centered wheel mesh per corner under a steer▸spin pivot at its hub.
+    for (const key of Object.keys(buckets)) {
+      const b = buckets[key];
+      const bb = new THREE.Box3();
+      for (let i = 0; i < b.pos.length; i += 3) bb.expandByPoint(vA.set(b.pos[i], b.pos[i + 1], b.pos[i + 2]));
+      const c = new THREE.Vector3(); bb.getCenter(c);
+      const posArr = new Float32Array(b.pos);
+      for (let i = 0; i < posArr.length; i += 3) { posArr[i] -= c.x; posArr[i + 1] -= c.y; posArr[i + 2] -= c.z; }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+      g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(b.nrm), 3));
+      if (b.uv.length) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(b.uv), 2));
+
+      const steer = new THREE.Group(); steer.name = 'wheelSteer'; steer.position.copy(c);
+      const spin = new THREE.Group(); spin.name = 'wheelSpin'; steer.add(spin);
+      const wm = new THREE.Mesh(g, wheelMat); wm.castShadow = true; wm.receiveShadow = true;
+      spin.add(wm);
+      root.add(steer);
+    }
+  }
 
   // Center horizontally, rest the base on y=0, scale to MODEL_TARGET_LEN, face +Z.
   function normalizeModel(root) {
@@ -42,14 +109,58 @@
     return wrap;
   }
 
+  // One-time prep of the shared prototype: split wheels, tag the front pair (the
+  // two with the greatest +Z after orienting), and mark accent meshes for tinting.
+  function prepareProto(scene) {
+    splitWheels(scene);
+    scene.traverse((o) => {
+      if (o.isMesh && o.material && ACCENT_MAT_NAMES.includes(o.material.name)) o.userData.accent = true;
+    });
+    const wrap = normalizeModel(scene);
+    wrap.updateMatrixWorld(true);
+    const steers = [];
+    wrap.traverse((o) => { if (o.name === 'wheelSteer') steers.push(o); });
+    const wz = new Map();
+    for (const s of steers) wz.set(s, new THREE.Vector3().setFromMatrixPosition(s.matrixWorld).z);
+    const byZ = steers.slice().sort((a, b) => wz.get(b) - wz.get(a));
+    byZ.forEach((s, i) => { s.userData.front = i < 2; });   // 2 frontmost steer
+    return wrap;
+  }
+
   function attachModelTo(rig) {
     if (_modelFailed) return;
     if (!_modelProto) { _pendingRigs.push(rig); return; }
-    const m = _modelProto.clone(true);   // shares geometry/material refs across players
+    const m = _modelProto.clone(true);   // shares geometry across players; we clone tinted mats below
     if (rig.placeholder) { rig.group.remove(rig.placeholder); rig.placeholder = null; }
+
+    rig.modelWheels = [];
+    rig.accentMats = [];
+    m.traverse((o) => {
+      if (o.name === 'wheelSteer') {
+        const spin = o.getObjectByName('wheelSpin') || o.children[0];
+        rig.modelWheels.push({ steer: o, spin, front: !!o.userData.front });
+      } else if (o.isMesh && o.userData.accent) {
+        o.material = o.material.clone();         // per-rig copy so each player tints independently
+        rig.accentMats.push(o.material);
+      }
+    });
+    applyAccent(rig);
+
     rig.group.add(m);
     rig.model = m;
   }
+
+  // Tint this rig's accent materials + beacon to its assigned color. The accent
+  // meshes keep their texture (color multiply) but get a faint emissive of the
+  // same hue so the body reads as the player's color even over the gold foil.
+  function applyAccent(rig) {
+    if (rig.MAT && rig.MAT.fender) rig.MAT.fender.color.setHex(rig._accent);
+    if (rig.accentMats) for (const mat of rig.accentMats) {
+      mat.color.setHex(rig._accent);
+      if (mat.emissive) { mat.emissive.setHex(rig._accent); mat.emissiveIntensity = 0.35; }
+    }
+  }
+  G._applyAccent = applyAccent;
 
   (function loadModel() {
     if (!THREE.GLTFLoader) {
@@ -60,7 +171,7 @@
     new THREE.GLTFLoader().load(
       MODEL_URL,
       (gltf) => {
-        _modelProto = normalizeModel(gltf.scene);
+        _modelProto = prepareProto(gltf.scene);
         for (const rig of _pendingRigs) attachModelTo(rig);
         _pendingRigs.length = 0;
       },
@@ -158,6 +269,7 @@
     const rig = {
       group: buggy, MAT, WHEELS_LOCAL, wheelPivots, wheelSpins,
       WHEEL_REST_Y, headlamp, shieldMesh, placeholder, model: null,
+      _accent: accentHex, accentMats: [], modelWheels: null,
       setLights, get lightsOn() { return lightsOn; },
     };
     attachModelTo(rig);   // swaps in the GLB now if loaded, else when it arrives
@@ -171,7 +283,8 @@
   G.myRig = rig;
 
   G.setMyColor = function (hex) {
-    rig.MAT.fender.color.setHex(hex);
+    rig._accent = hex;
+    G._applyAccent(rig);
   };
 
   const rover = {
@@ -519,18 +632,15 @@
     _qTarget.setFromRotationMatrix(_basis);
     rig.group.quaternion.slerp(_qTarget, 1 - Math.exp(-(rover.grounded ? 9 : 2.5) * dt));
 
-    const k = 1 - Math.exp(-14 * dt);
-    for (let i = 0; i < 4; i++) {
-      const ww = wheelWorld[i];
-      const planeY = rover.centerGy
-        - (n.x * (ww.x - rover.pos.x) + n.z * (ww.z - rover.pos.z)) / Math.max(n.y, 0.3);
-      const susp = clamp(rover.wheelGy[i] - planeY, -0.26, 0.18);
-      const pivot = rig.wheelPivots[i];
-      pivot.position.y = lerp(pivot.position.y, rig.WHEEL_REST_Y + susp, k);
-      if (rig.WHEELS_LOCAL[i].front) {
-        pivot.rotation.y = lerp(pivot.rotation.y, rover.steer * 0.5, 1 - Math.exp(-10 * dt));
+    // drive the GLB's split wheels: roll all, steer the front pair
+    if (rig.modelWheels) {
+      const roll = (rover.vF / CFG.wheelRadius) * dt * WHEEL_ROLL_SIGN;
+      const steerA = rover.steer * 0.5;
+      const sk = 1 - Math.exp(-10 * dt);
+      for (const w of rig.modelWheels) {
+        w.spin.rotation.z += roll;
+        if (w.front) w.steer.rotation.y = lerp(w.steer.rotation.y, steerA, sk);
       }
-      rig.wheelSpins[i].rotation.x += (rover.vF / CFG.wheelRadius) * dt;
     }
 
     // shield / invuln / dead visuals

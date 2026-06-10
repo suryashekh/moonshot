@@ -17,6 +17,7 @@ const http   = require('http');
 const fs     = require('fs');
 const path   = require('path');
 const os     = require('os');
+const zlib   = require('zlib');
 const crypto = require('crypto');
 const WebSocket = require('ws');
 const S = require('../shared/constants.js');
@@ -48,8 +49,20 @@ const httpServer = http.createServer((req, res) => {
   }
   fs.readFile(file, (err, data) => {
     if (err) { res.writeHead(404); return res.end('not found'); }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
-    res.end(data);
+    const type = MIME[path.extname(file)] || 'application/octet-stream';
+    // gzip compressible assets (geometry-heavy .glb wins most) when the client accepts it
+    const gzOK = /\b(gzip)\b/.test(req.headers['accept-encoding'] || '') &&
+                 /\b(text|javascript|json|gltf)\b/.test(type) && data.length > 1024;
+    if (gzOK) {
+      zlib.gzip(data, (gzErr, gz) => {
+        if (gzErr) { res.writeHead(200, { 'Content-Type': type }); return res.end(data); }
+        res.writeHead(200, { 'Content-Type': type, 'Content-Encoding': 'gzip', 'Vary': 'Accept-Encoding' });
+        res.end(gz);
+      });
+    } else {
+      res.writeHead(200, { 'Content-Type': type });
+      res.end(data);
+    }
   });
 });
 

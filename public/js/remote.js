@@ -106,8 +106,11 @@
       _q.setFromRotationMatrix(_basis);
       grp.quaternion.slerp(_q, 1 - Math.exp(-8 * dt));
 
-      // wheels
-      for (const sp of this.rig.wheelSpins) sp.rotation.x += (vf / G.CFG.wheelRadius) * dt;
+      // wheels (split GLB wheels: roll about the axle)
+      if (this.rig.modelWheels) {
+        const roll = (vf / G.CFG.wheelRadius) * dt * (G.WHEEL_ROLL_SIGN || 1);
+        for (const w of this.rig.modelWheels) w.spin.rotation.z += roll;
+      }
 
       // status visuals
       const sNow = G.serverNow();
