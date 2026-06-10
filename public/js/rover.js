@@ -302,6 +302,10 @@
     odo: 0,
     spinVel: 0,            // imposed spin from hits (rad/s, decays)
     slipUntil: 0,          // mine slip: grip near zero until this ts
+    trickSpin: 0,          // banked yaw spin while airborne (stunt credit)
+    airTilt: 0,            // small visual pitch from air control (clamped)
+    stuntUntil: 0,         // clean-landing reward window (perf.now ms)
+    rampCdUntil: 0,        // ramp launch debounce
   };
   G.rover = rover;
 
@@ -329,6 +333,7 @@
     if (e.code === 'KeyL') { rig.setLights(!rig.lightsOn); }
     if (e.code === 'KeyQ') { if (G.cycleItem) G.cycleItem(1); }
     if (e.code === 'KeyF') { if (G.fireGun) G.fireGun(); e.preventDefault(); }
+    if (e.code === 'KeyE') { if (G.fireTurbo) G.fireTurbo(); e.preventDefault(); }
     if (/^Digit[1-5]$/.test(e.code)) {
       if (G.selectItem) G.selectItem(+e.code.slice(-1) - 1);
     }
@@ -355,6 +360,7 @@
       if (!k) {   // non-movement buttons: item / cycle / blaster
         const fn = btn.id === 't-cycle' ? () => { if (G.cycleItem) G.cycleItem(1); }
           : btn.id === 't-gun' ? () => { if (G.fireGun) G.fireGun(); }
+          : btn.id === 't-turbo' ? () => { if (G.fireTurbo) G.fireTurbo(); }
           : () => { if (G.useItem) G.useItem(); };
         btn.addEventListener('pointerdown', (e) => { fn(); e.preventDefault(); });
         return;
@@ -380,6 +386,9 @@
     rover.grounded = true;
     rover.airTime = 0;
     rover.spinVel = 0;
+    rover.trickSpin = 0;
+    rover.airTilt = 0;
+    rover.stuntUntil = 0;
     G.cameraSnap = true;
   };
 
@@ -464,6 +473,19 @@
       const dir = rover.vF >= -0.2 ? 1 : -1;
       const speedFac = clamp(hSpeed / 3.5, 0, 1) / (1 + hSpeed * 0.035);
       rover.heading += rover.steer * CFG.steerRate * speedFac * dir * dt;
+    } else if (rover.airTime > S.STUNT.spinDelayS && !locked) {
+      // airborne: steering = gentle yaw (banks stunt credit),
+      // throttle = AIR CONTROL — nudges velocity, small body tilt only
+      const spin = rover.steer * S.STUNT.spinRate * dt;
+      rover.heading += spin;
+      rover.trickSpin += Math.abs(spin);
+      const thrIn = (keys.fwd ? 1 : 0) - (keys.back ? 1 : 0);
+      if (thrIn) {
+        rover.vel.x += Math.sin(rover.heading) * thrIn * S.STUNT.airCtrl * dt;
+        rover.vel.z += Math.cos(rover.heading) * thrIn * S.STUNT.airCtrl * dt;
+      }
+      const tiltTarget = thrIn * S.STUNT.tiltMax;
+      rover.airTilt += (tiltTarget - rover.airTilt) * Math.min(S.STUNT.tiltRate * dt, 1);
     } else {
       rover.heading += rover.steer * 0.3 * dt;
     }
@@ -483,8 +505,11 @@
 
     // --- Modifier-adjusted performance envelope
     const dmgFac = st.hp < 50 ? (0.55 + 0.45 * st.hp / 50) : 1;   // crippled rover
-    let maxSpeed = CFG.maxSpeed * dmgFac + (boostT ? 11 : 0);
-    let accel = CFG.engineAccel * (boostT ? 2.2 : 1);
+    const stuntT = rover.stuntUntil > now;
+    let maxSpeed = CFG.maxSpeed * dmgFac + (boostT ? 11 : 0)
+      + (zone === 'speed' ? 9 : 0) + (stuntT ? S.STUNT.boostSpeed : 0);
+    let accel = CFG.engineAccel * (boostT ? 2.2 : 1)
+      * (zone === 'speed' ? 1.7 : 1) * (stuntT ? 1.4 : 1);
     let rollResist = CFG.rollResist * (zone === 'rough' ? 3.0 : 1);
 
     if (groundedPrev) {
@@ -527,12 +552,44 @@
       const impact = rover.vel.y;
       rover.pos.y = gNew;
       if (rover.vel.y < 0) rover.vel.y = 0;
-      if (!groundedPrev && impact < -2.0) onLanding(-impact);
+      if (!groundedPrev) {
+        if (impact < -2.0) onLanding(-impact);
+        // stunt scoring: enough air + enough spin banked = boost reward
+        if (rover.airTime > S.STUNT.minAirS && rover.trickSpin > S.STUNT.minTrick) {
+          rover.stuntUntil = now + S.STUNT.boostMs;
+          if (G.hud) G.hud.alert('🛞 STUNT LANDED — OVERDRIVE!', 1800);
+          G.beep(740, 70, 'square', 0.07);
+          setTimeout(() => G.beep(1110, 70, 'square', 0.07), 70);
+          setTimeout(() => G.beep(1480, 140, 'square', 0.07), 140);
+          G.dustBurst(rover.pos.x, rover.pos.y, rover.pos.z, 7);
+        }
+        rover.trickSpin = 0;
+      }
       rover.grounded = true;
       rover.airTime = 0;
     } else {
       rover.grounded = (rover.pos.y - gNew) < 0.12;
       if (!rover.grounded) rover.airTime += dt;
+    }
+
+    // --- launch ramps: ride UP one (aligned with it, fast) → big air.
+    //     Clipping it sideways or backwards does nothing.
+    if (rover.grounded && now > rover.rampCdUntil) {
+      for (const rp of S.RAMPS) {
+        const dx = rover.pos.x - rp.x, dz = rover.pos.z - rp.z;
+        if (dx * dx + dz * dz > rp.r * rp.r || hSpeed < rp.minSpeed) continue;
+        const align = (rover.vel.x * Math.sin(rp.heading) + rover.vel.z * Math.cos(rp.heading))
+          / Math.max(hSpeed, 1e-3);
+        if (align < rp.minAlign) continue;
+        rover.rampCdUntil = now + 1500;
+        rover.vel.y = clamp(hSpeed * rp.kick, 5, 13);
+        rover.grounded = false;
+        rover.pos.y += 0.25;
+        G.beep(420, 130, 'sawtooth', 0.07);
+        G.dustBurst(rover.pos.x, rover.pos.y, rover.pos.z, 5);
+        if (G.addCamShake) G.addCamShake(0.1);
+        break;
+      }
     }
 
     // --- Boulder collisions (+ rock-hit damage report)
@@ -617,6 +674,8 @@
   /* ---------------- visual sync ---------------- */
   const _basis = new THREE.Matrix4();
   const _qTarget = new THREE.Quaternion();
+  const _qFlip = new THREE.Quaternion();
+  const _xAxis = new THREE.Vector3(1, 0, 0);
 
   function syncBuggy(dt) {
     rover.bounceVel += (-rover.bounce * 90 - rover.bounceVel * 9) * dt;
@@ -631,6 +690,13 @@
     _basis.makeBasis(_right, n, _fwd);
     _qTarget.setFromRotationMatrix(_basis);
     rig.group.quaternion.slerp(_qTarget, 1 - Math.exp(-(rover.grounded ? 9 : 2.5) * dt));
+    // small air-control tilt on top of the smoothed base orientation;
+    // eases back to level on the ground
+    if (rover.grounded && rover.airTilt) rover.airTilt *= Math.exp(-7 * dt);
+    if (Math.abs(rover.airTilt) > 0.003) {
+      _qFlip.setFromAxisAngle(_xAxis, -rover.airTilt);
+      rig.group.quaternion.multiply(_qFlip);
+    } else rover.airTilt = 0;
 
     // drive the GLB's split wheels: roll all, steer the front pair
     if (rig.modelWheels) {

@@ -164,6 +164,7 @@ class Room {
       // combat
       hp: S.DMG.maxHp, items: [], useCooldownUntil: 0,
       gunShots: S.GUN.shots, gunRechargeAt: 0, lastGunAt: 0,
+      turboCharges: S.TURBO.charges, turboRechargeAt: 0, lastTurboAt: 0,
       shieldUntil: 0, empUntil: 0, boostUntil: 0, gstabUntil: 0, decoyUntil: 0,
       deadUntil: 0, invulnUntil: 0, lastRamAt: 0, lastOuchAt: 0,
       disconnectedAt: 0,
@@ -196,6 +197,7 @@ class Room {
       p.lap = 1; p.nextGate = 0; p.gatesPassed = 0; p.bestLap = 0;
       p.finished = false; p.totalMs = 0; p.hp = S.DMG.maxHp; p.items.length = 0;
       p.gunShots = S.GUN.shots; p.gunRechargeAt = 0; p.lastGunAt = 0;
+      p.turboCharges = S.TURBO.charges; p.turboRechargeAt = 0; p.lastTurboAt = 0;
       p.shieldUntil = p.empUntil = p.boostUntil = p.gstabUntil = p.decoyUntil = 0;
       p.deadUntil = 0; p.invulnUntil = 0; p.startIdx = i++;
     }
@@ -217,10 +219,10 @@ class Room {
         this.raceStartTs = now();
         const t0 = this.raceStartTs;
         for (const p of this.players.values()) p.lapStartTs = t0;
-        this.nextAsteroidAt = t0 + 8000;
+        this.nextAsteroidAt = t0 + 18000;
         this.nextShowerAt = 0;
         this.nextHazardAt = t0 + 20000;
-        this.nextAlienAt = t0 + 13000;
+        this.nextAlienAt = t0 + 40000;
         this.broadcast({ t: 'go', ts: t0 });
       }
     };
@@ -547,6 +549,23 @@ class Room {
     send(p.ws, { t: 'ammo', shots: p.gunShots, rechargeAt: p.gunShots <= 0 ? p.gunRechargeAt : 0 });
   }
 
+  /* ----- turbo (same magazine + recharge-gap model as the blaster) ----- */
+  fireTurbo(p) {
+    const t = now();
+    if (this.state !== 'race' || p.finished || p.deadUntil > t) return;
+    if (t - p.lastTurboAt < S.TURBO.useGapMs) return;
+    if (p.turboCharges <= 0) {
+      if (t >= p.turboRechargeAt) p.turboCharges = S.TURBO.charges;   // recharged
+      else return;                                                    // still in the gap
+    }
+    p.lastTurboAt = t;
+    p.turboCharges--;
+    if (p.turboCharges <= 0) p.turboRechargeAt = t + S.TURBO.rechargeMs;
+    p.boostUntil = t + S.TURBO.burstMs;
+    this.broadcast({ t: 'fx', kind: 'boost', id: p.id, until: p.boostUntil });
+    send(p.ws, { t: 'turboAmmo', charges: p.turboCharges, rechargeAt: p.turboCharges <= 0 ? p.turboRechargeAt : 0 });
+  }
+
   /* ----- aliens (humanoid hostiles) ----- */
   spawnAlien() {
     const t = now();
@@ -767,21 +786,21 @@ class Room {
       if (t >= a.impactTs) { this.resolveAsteroid(a); this.asteroids.splice(i, 1); }
     }
 
-    /* asteroid scheduler (difficulty ramps with leader lap) */
+    /* asteroid scheduler (difficulty ramps with leader lap, but sparse —
+       rocks should be events you dodge, not weather) */
     const lap = this.leaderLap();
     if (t >= this.nextAsteroidAt) {
       this.spawnAsteroid();
-      const base = lap === 1 ? [6500, 10000] : lap === 2 ? [4000, 6500] : [2500, 4500];
+      const base = lap === 1 ? [16000, 24000] : lap === 2 ? [12000, 18000] : [9000, 14000];
       this.nextAsteroidAt = t + base[0] + this.rng() * (base[1] - base[0]);
-      if (lap === 2 && this.rng() < 0.3) this.spawnAsteroid();
     }
     if (lap >= 3) {
-      if (!this.nextShowerAt) this.nextShowerAt = t + 12000;
+      if (!this.nextShowerAt) this.nextShowerAt = t + 25000;
       if (t >= this.nextShowerAt) {
         this.broadcast({ t: 'shower' });
-        const n = 5 + (this.rng() * 4) | 0;
+        const n = 2 + (this.rng() * 2) | 0;
         for (let i = 0; i < n; i++) this.spawnAsteroid({ warnMs: 2400 + this.rng() * 1800 });
-        this.nextShowerAt = t + 20000 + this.rng() * 10000;
+        this.nextShowerAt = t + 45000 + this.rng() * 20000;
       }
     }
 
@@ -986,6 +1005,7 @@ wss.on('connection', (ws) => {
       }
       case 'use': if (room && player) room.useItem(player, m.slot); break;
       case 'gun': if (room && player) room.fireGun(player); break;
+      case 'turbo': if (room && player) room.fireTurbo(player); break;
       case 'ouch': {
         // client-reported environmental damage, clamped + rate-limited
         if (!room || !player || room.state !== 'race') return;

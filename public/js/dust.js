@@ -150,6 +150,28 @@
   });
   const ringGeo = new THREE.RingGeometry(0.92, 1.0, 48);
 
+  /* billowing plume blobs: a few cached lumpy spheres (displaced icosa)
+     reused by every explosion — yellow core → orange lobes → smoke tips */
+  const blobGeos = (function () {
+    const out = [];
+    for (let v = 0; v < 3; v++) {
+      const g = new THREE.IcosahedronGeometry(1, 1);
+      const pos = g.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const k = 1 + (Math.random() - 0.5) * 0.42;
+        pos.setXYZ(i, pos.getX(i) * k, pos.getY(i) * k, pos.getZ(i) * k);
+      }
+      g.computeVertexNormals();
+      out.push(g);
+    }
+    return out;
+  })();
+  const PLUME_COLORS = [
+    { c: 0xffe27a, e: 0xffc23d, ei: 1.6 },   // glowing core / base
+    { c: 0xff8a30, e: 0xff5a1a, ei: 0.9 },   // fire mid
+    { c: 0x9094a0, e: 0x2c2f38, ei: 0.25 },  // smoke tip
+  ];
+
   function explosion(x, z, size) {
     const y = G.terrainHeight(x, z);
     size = size || 1;
@@ -170,6 +192,45 @@
     rm.position.set(x, y + 0.25, z);
     G.scene.add(rm);
     fx.push({ mesh: rm, kind: 'ring', t: 0, life: 0.9, size: 16 * size });
+
+    // billowing plume sculpture: glowing core + lobed columns fanning
+    // up and outward, yellow → orange → smoke-grey toward the tips
+    {
+      const grp = new THREE.Group();
+      grp.position.set(x, y + 0.2, z);
+      const mats = PLUME_COLORS.map(p => new THREE.MeshStandardMaterial({
+        color: p.c, emissive: p.e, emissiveIntensity: p.ei,
+        roughness: 0.85, metalness: 0, transparent: true, opacity: 1,
+      }));
+      const blobs = [];
+      const core = new THREE.Mesh(blobGeos[(Math.random() * 3) | 0], mats[0]);
+      core.scale.setScalar(1.15 * size);
+      core.position.y = 0.7 * size;
+      grp.add(core);
+      blobs.push({ m: core, tx: 0, ty: 0.7 * size, tz: 0 });
+
+      const nPlumes = Math.min(6 + (size * 2) | 0, 10);
+      for (let p = 0; p < nPlumes; p++) {
+        const az = (p / nPlumes) * Math.PI * 2 + Math.random() * 0.5;
+        const el = 0.55 + Math.random() * 0.75;              // mostly upward fan
+        const dx = Math.cos(az) * Math.cos(el), dy = Math.sin(el), dz = Math.sin(az) * Math.cos(el);
+        const len = (2.4 + Math.random() * 1.4) * size;
+        const segs = 3 + (Math.random() * 2) | 0;
+        for (let s = 0; s < segs; s++) {
+          const f = (s + 1) / segs;
+          const mat = mats[f < 0.45 ? 0 : f < 0.8 ? 1 : 2];
+          const b = new THREE.Mesh(blobGeos[(Math.random() * 3) | 0], mat);
+          b.scale.setScalar((0.85 - f * 0.45) * size * (0.8 + Math.random() * 0.3));
+          const jx = (Math.random() - 0.5) * 0.4 * size, jz = (Math.random() - 0.5) * 0.4 * size;
+          grp.add(b);
+          blobs.push({ m: b, tx: dx * len * f + jx, ty: dy * len * f + 0.4 * size, tz: dz * len * f + jz });
+        }
+      }
+      // start collapsed at the core; updateFx expands toward targets
+      for (const b of blobs) b.m.position.set(b.tx * 0.15, b.ty * 0.25, b.tz * 0.15);
+      G.scene.add(grp);
+      fx.push({ mesh: grp, kind: 'plume', t: 0, life: 1.05, blobs, mats, size });
+    }
 
     // debris rocks on ballistic arcs
     const n = (5 + size * 4) | 0;
@@ -213,7 +274,8 @@
       const k = e.t / e.life;
       if (k >= 1) {
         G.scene.remove(e.mesh);
-        if (e.mesh.material && e.mesh.material !== G.rockMat) e.mesh.material.dispose();
+        if (e.mats) for (const m of e.mats) m.dispose();
+        else if (e.mesh.material && e.mesh.material !== G.rockMat) e.mesh.material.dispose();
         fx.splice(i, 1);
         continue;
       }
@@ -224,6 +286,22 @@
         const r = 1 + k * e.size;
         e.mesh.scale.set(r, r, 1);
         e.mesh.material.opacity = 0.85 * (1 - k);
+      } else if (e.kind === 'plume') {
+        // fast overshoot expansion, slow rise, fade in the last 40%
+        const ext = 1 - Math.pow(1 - k, 3);
+        for (const b of e.blobs) {
+          b.m.position.set(
+            b.tx * (0.15 + 0.85 * ext),
+            b.ty * (0.25 + 0.75 * ext),
+            b.tz * (0.15 + 0.85 * ext)
+          );
+        }
+        e.mesh.position.y += dt * 0.6 * e.size;
+        e.mesh.rotation.y += dt * 0.15;
+        if (k > 0.6) {
+          const op = 1 - (k - 0.6) / 0.4;
+          for (const m of e.mats) m.opacity = op;
+        }
       } else if (e.kind === 'debris') {
         e.vy -= CFG.gravity * 2.2 * dt;       // slightly heavy debris reads better
         e.mesh.position.x += e.vx * dt;

@@ -143,6 +143,7 @@
         st.gravUntil = 0; st.gravScale = 1;
         G.hud.resetStreak();
         if (G.resetGun) G.resetGun();
+        if (G.resetTurbo) G.resetTurbo();
         if (G.clearAliens) G.clearAliens();
         st.lap = 1; st.nextGate = 0; st.bestLap = 0;
         st.shieldUntil = st.empUntil = st.boostUntil = st.gstabUntil = 0;
@@ -265,6 +266,7 @@
       case 'lockOn':     G.onLockOn(m);     break;
       case 'meteorWarn': G.onMeteorWarn(m); break;
       case 'ammo':       G.onAmmo(m);       break;
+      case 'turboAmmo':  G.onTurboAmmo(m);  break;
 
       /* aliens */
       case 'alienSpawn': G.onAlienSpawn(m); break;

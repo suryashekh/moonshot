@@ -288,11 +288,18 @@
         const r = SHARED.trackRadius(a) + (rng() * 2 - 1) * 26;
         const x = Math.cos(a) * r, z = Math.sin(a) * r;
         if (s.kind === 'slip') paintPatch(x, z, 10 + rng() * 8, 'rgba(210,225,255,0.10)');
+        else if (s.kind === 'speed') paintPatch(x, z, 9 + rng() * 6, 'rgba(60,220,255,0.14)');
         else paintPatch(x, z, 7 + rng() * 7, 'rgba(0,0,0,0.16)');
       }
     }
     for (const j of SHARED.JUMP_PADS) {
       paintPatch(j.x, j.z, j.r, 'rgba(255,200,90,0.16)');
+    }
+    // bright approach marker leading onto each launch ramp
+    for (const rp of SHARED.RAMPS) {
+      paintPatch(rp.x, rp.z, 11, 'rgba(255,179,71,0.22)');
+      const bx = rp.x - Math.sin(rp.heading) * 12, bz = rp.z - Math.cos(rp.heading) * 12;
+      paintPatch(bx, bz, 7, 'rgba(255,179,71,0.15)');
     }
   })();
 

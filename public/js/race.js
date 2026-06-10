@@ -61,6 +61,153 @@
     }
   })();
 
+  /* ---------------- launch ramps + overdrive strips ---------------- */
+  // proper wedge ramp (custom geometry, like a skate ramp): low open
+  // entry edge facing oncoming traffic, deck rising to the launch lip,
+  // solid side walls, open at the top — the opening IS the direction.
+  function makeRampGeometry(w, len, h) {
+    const hw = w / 2, hl = len / 2;
+    // entry edge at -Z (ground level), launch lip at +Z (height h)
+    const tris = [
+      // deck (slightly above ground so it doesn't z-fight)
+      [-hw, 0.06, -hl], [hw, 0.06, -hl], [hw, h, hl],
+      [-hw, 0.06, -hl], [hw, h, hl], [-hw, h, hl],
+      // right side wall (solid wedge face)
+      [hw, 0, -hl], [hw, 0, hl], [hw, h, hl],
+      // left side wall
+      [-hw, 0, -hl], [-hw, h, hl], [-hw, 0, hl],
+      // back face under the lip
+      [hw, 0, hl], [-hw, 0, hl], [-hw, h, hl],
+      [hw, 0, hl], [-hw, h, hl], [hw, h, hl],
+    ];
+    const pos = new Float32Array(tris.length * 3);
+    tris.forEach((v, i) => pos.set(v, i * 3));
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.computeVertexNormals();
+    return geo;
+  }
+
+  const speedQuads = [];
+  (function buildTrackFurniture() {
+    for (const rp of S.RAMPS) {
+      const grp = new THREE.Group();
+      const gy = G.terrainHeight(rp.x, rp.z);
+      grp.position.set(rp.x, gy, rp.z);
+      grp.rotation.y = rp.heading;
+
+      const wedge = new THREE.Mesh(
+        makeRampGeometry(rp.w, rp.len, rp.h),
+        new THREE.MeshStandardMaterial({
+          color: 0x8b96a5, metalness: 0.55, roughness: 0.4,
+          emissive: 0x2a3340, emissiveIntensity: 0.6, side: THREE.DoubleSide,
+        })
+      );
+      wedge.castShadow = true; wedge.receiveShadow = true;
+      grp.add(wedge);
+
+      const slope = Math.atan2(rp.h, rp.len);
+      // amber chevron stripes up the deck — readable from a distance
+      for (let i = 0; i < 4; i++) {
+        const tz = -rp.len / 2 + (i + 0.5) * (rp.len / 4);
+        const ty = 0.1 + (tz + rp.len / 2) / rp.len * rp.h;
+        const stripe = new THREE.Mesh(
+          new THREE.BoxGeometry(rp.w - 0.6, 0.1, 0.55),
+          new THREE.MeshBasicMaterial({ color: 0xffb347 })
+        );
+        stripe.rotation.x = -slope;
+        stripe.position.set(0, ty + 0.06, tz);
+        grp.add(stripe);
+      }
+      // glowing rails along both inclined edges
+      for (const sx of [-(rp.w / 2 - 0.14), rp.w / 2 - 0.14]) {
+        const wall = new THREE.Mesh(
+          new THREE.BoxGeometry(0.3, 1.0, rp.len * 1.02),
+          new THREE.MeshStandardMaterial({ color: 0x39424d, metalness: 0.6, roughness: 0.5 })
+        );
+        wall.rotation.x = -slope;
+        wall.position.set(sx, rp.h / 2 + 0.5, 0);
+        wall.castShadow = true;
+        grp.add(wall);
+        const railGlow = new THREE.Mesh(
+          new THREE.BoxGeometry(0.34, 0.12, rp.len * 1.02),
+          new THREE.MeshBasicMaterial({ color: 0xffb347 })
+        );
+        railGlow.rotation.x = -slope;
+        railGlow.position.set(sx, rp.h / 2 + 1.02, 0);
+        grp.add(railGlow);
+      }
+      // glowing launch lip across the top edge
+      const lip = new THREE.Mesh(
+        new THREE.BoxGeometry(rp.w, 0.18, 0.35),
+        new THREE.MeshBasicMaterial({ color: 0xffd76b })
+      );
+      lip.position.set(0, rp.h + 0.07, rp.len / 2 - 0.18);
+      grp.add(lip);
+      const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: G.glowTex, color: 0xffb347, transparent: true,
+        blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.6,
+      }));
+      glow.scale.setScalar(11);
+      glow.position.set(0, rp.h + 1.6, rp.len / 2 - 0.5);
+      grp.add(glow);
+      G.scene.add(grp);
+    }
+
+    // overdrive strips: pulsing cyan quads along each speed sector
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x3fe0ff, transparent: true, opacity: 0.22,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    });
+    for (const s of S.ZONES) {
+      if (s.kind !== 'speed') continue;
+      const steps = 7;
+      for (let i = 0; i < steps; i++) {
+        const a = s.a0 + (s.a1 - s.a0) * ((i + 0.5) / steps);
+        const r = S.trackRadius(a);
+        const x = Math.cos(a) * r, z = Math.sin(a) * r;
+        const quad = new THREE.Mesh(new THREE.PlaneGeometry(7, 2.4), mat);
+        quad.rotation.x = -Math.PI / 2;
+        quad.rotation.z = -Math.atan2(-Math.sin(a) * r, Math.cos(a) * r);
+        quad.position.set(x, G.terrainHeight(x, z) + 0.3, z);
+        G.scene.add(quad);
+        speedQuads.push({ quad, ph: i * 0.7 });
+      }
+    }
+  })();
+
+  /* ---------------- wrong-way detector ----------------
+     Driving away from the next gate at speed for >1 s flashes the
+     WRONG WAY banner (the beacon beam on the cyan gate shows the way). */
+  const elWrong = document.getElementById('wrongway');
+  let wrongSince = 0;
+
+  function updateGuidance(dt) {
+    const st = G.state, r = G.rover;
+    const racing = st.phase === 'race' && !st.finished && !(st.deadUntil > G.serverNow());
+    if (!racing) { elWrong.classList.remove('show'); wrongSince = 0; return; }
+
+    const g = GATES[st.nextGate];
+    const dx = g.x - r.pos.x, dz = g.z - r.pos.z;
+
+    // wrong way: moving fast with velocity pointing away from the next gate
+    const sp = Math.hypot(r.vel.x, r.vel.z);
+    const d = Math.hypot(dx, dz) || 1;
+    const dot = (r.vel.x * dx + r.vel.z * dz) / (d * Math.max(sp, 1e-3));
+    if (sp > 4 && dot < -0.45) {
+      wrongSince += dt;
+      if (wrongSince > 1.0) {
+        if (!elWrong.classList.contains('show')) {
+          elWrong.classList.add('show');
+          G.beep(220, 250, 'square', 0.07);
+        }
+      }
+    } else {
+      wrongSince = 0;
+      elWrong.classList.remove('show');
+    }
+  }
+
   function setGateColor(o, hex) {
     o.torus.material.color.setHex(hex);
     o.pyl.color.setHex(hex);
@@ -203,6 +350,11 @@
 
   G.updateRace = function (dt, now) {
     updateGates(dt);
+    updateGuidance(dt);
     drawMinimap(now);
+    // overdrive strips share one material — one pulse drives them all
+    if (speedQuads.length) {
+      speedQuads[0].quad.material.opacity = 0.16 + 0.1 * Math.sin(now * 0.006);
+    }
   };
 })();

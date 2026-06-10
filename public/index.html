@@ -35,6 +35,8 @@
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
     pointer-events:none;
   }
+  /* race HUD panels are display:none until the race view turns them on */
+  #race.show, #minimapPanel.show, #vitals.show{ display:block; }
   .lbl{ font-size:10px; letter-spacing:.14em; color:var(--dim); text-transform:uppercase; }
   .val{ font-size:13px; color:var(--ink); }
   .rule{ height:1px; background:var(--line); margin:9px 0; }
@@ -64,13 +66,18 @@
     background:rgba(255,179,71,.16); }
   #itemname{ margin-top:4px; }
 
-  /* pulse blaster magazine */
-  #gunbar{ margin-top:7px; display:flex; align-items:center; gap:4px; height:14px; position:relative; }
-  #gunbar .gunlbl{ font-size:9px; letter-spacing:.14em; color:var(--cyan); margin-right:4px; }
-  #gunbar i{ width:14px; height:7px; border:1px solid var(--line); border-radius:2px; display:inline-block; }
+  /* pulse blaster + turbo magazines (same pip mechanic) */
+  #gunbar, #turbobar{ margin-top:7px; display:flex; align-items:center; gap:4px; height:14px; position:relative; }
+  #gunbar .gunlbl, #turbobar .gunlbl{ font-size:9px; letter-spacing:.14em; color:var(--cyan); margin-right:4px; }
+  #turbobar .gunlbl{ color:var(--amber); }
+  #gunbar i, #turbobar i{ width:14px; height:7px; border:1px solid var(--line); border-radius:2px; display:inline-block; }
   #gunbar i.on{ background:var(--cyan); border-color:var(--cyan); box-shadow:0 0 5px rgba(79,210,255,.6); }
+  #turbobar i{ width:22px; }
+  #turbobar i.on{ background:var(--amber); border-color:var(--amber); box-shadow:0 0 5px rgba(255,179,71,.6); }
   #gunbar.recharge .gunfill{ position:absolute; left:74px; right:0; top:3px; height:7px;
     background:linear-gradient(90deg, rgba(79,210,255,.7), rgba(79,210,255,.25)); border-radius:2px; max-width:96px; }
+  #turbobar.recharge .gunfill{ position:absolute; left:74px; right:0; top:3px; height:7px;
+    background:linear-gradient(90deg, rgba(255,179,71,.7), rgba(255,179,71,.25)); border-radius:2px; max-width:96px; }
 
   /* live standings — inside the minimap panel, below the canvas */
   #standings{ display:none; margin-top:7px; border-top:1px solid var(--line);
@@ -81,6 +88,14 @@
   .strow span{ flex:1; letter-spacing:.06em; }
   .strow em{ font-style:normal; color:var(--dim); font-size:10px; }
   .strow.me span{ text-shadow:0 0 8px currentColor; }
+
+  /* wrong-way banner — big, red, impossible to miss */
+  #wrongway{ position:fixed; left:50%; top:26%; transform:translateX(-50%);
+    font-size:34px; font-weight:700; letter-spacing:.22em; color:#ff5040;
+    text-shadow:0 0 22px rgba(255,80,64,.9); display:none; pointer-events:none;
+    animation:wrongpulse .5s ease-in-out infinite alternate; }
+  #wrongway.show{ display:block; }
+  @keyframes wrongpulse{ from{ opacity:.55; } to{ opacity:1; } }
 
   /* hit confirmation — pops near crosshair-height, amber, quick */
   #hitmark{ position:fixed; left:50%; top:38%; transform:translateX(-50%) scale(.6);
@@ -223,6 +238,7 @@
   #t-item { right:96px; bottom:110px; color:var(--amber); }
   #t-cycle{ right:162px; bottom:84px; width:48px; height:48px; font-size:16px; color:var(--cyan); }
   #t-gun  { right:96px; bottom:188px; color:var(--cyan); }
+  #t-turbo{ right:174px; bottom:158px; color:var(--amber); font-size:16px; }
   #t-brake{ left:57px; bottom:158px; font-size:12px; letter-spacing:.1em; }
   @media (pointer:coarse){ #help{ display:none; } }
 </style>
@@ -253,6 +269,7 @@
   </div>
   <div class="lbl" id="itemname">NO PAYLOAD · Shift fire · Q/wheel swap</div>
   <div id="gunbar"></div>
+  <div id="turbobar"></div>
   <div id="conn">LINK: OFFLINE</div>
 </div>
 
@@ -344,8 +361,10 @@
   <div class="tbtn" id="t-item">☄</div>
   <div class="tbtn" id="t-cycle">⇄</div>
   <div class="tbtn" id="t-gun">⌖</div>
+  <div class="tbtn" id="t-turbo">»»</div>
 </div>
 <div id="hitmark">✕ HIT</div>
+<div id="wrongway">⟲ WRONG WAY</div>
 
 <script src="/lib/three.min.js"></script>
 <script>
