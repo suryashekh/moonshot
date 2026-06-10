@@ -129,7 +129,7 @@ class Room {
       lap: 1, nextGate: 0, gatesPassed: 0, lapStartTs: 0, bestLap: 0,
       finished: false, totalMs: 0, rank: 1, progress: 0,
       // combat
-      hp: S.DMG.maxHp, item: null, useCooldownUntil: 0,
+      hp: S.DMG.maxHp, items: [], useCooldownUntil: 0,
       shieldUntil: 0, empUntil: 0, boostUntil: 0, gstabUntil: 0, decoyUntil: 0,
       deadUntil: 0, invulnUntil: 0, lastRamAt: 0, lastOuchAt: 0,
       disconnectedAt: 0,
@@ -158,7 +158,7 @@ class Room {
     let i = 0;
     for (const p of this.players.values()) {
       p.lap = 1; p.nextGate = 0; p.gatesPassed = 0; p.bestLap = 0;
-      p.finished = false; p.totalMs = 0; p.hp = S.DMG.maxHp; p.item = null;
+      p.finished = false; p.totalMs = 0; p.hp = S.DMG.maxHp; p.items.length = 0;
       p.shieldUntil = p.empUntil = p.boostUntil = p.gstabUntil = p.decoyUntil = 0;
       p.deadUntil = 0; p.invulnUntil = 0; p.startIdx = i++;
     }
@@ -209,7 +209,7 @@ class Room {
       return false;
     }
     victim.hp = Math.max(0, victim.hp - dmg);
-    this.broadcast({ t: 'damage', id: victim.id, hp: victim.hp, kind, src: srcId || 0, fx: fx || null });
+    this.broadcast({ t: 'damage', id: victim.id, hp: victim.hp, dmg, kind, src: srcId || 0, fx: fx || null });
     if (victim.hp <= 0) this.kill(victim, kind, srcId);
     return true;
   }
@@ -246,21 +246,33 @@ class Room {
   spawnAsteroid(opts) {
     const t = now();
     const o = opts || {};
-    let x = o.x, z = o.z;
-    if (x === undefined) {
-      const a = this.rng() * S.TAU;
-      const r = S.trackRadius(a) + (this.rng() * 2 - 1) * 28;
-      x = Math.cos(a) * r; z = Math.sin(a) * r;
-    }
     const lap = this.leaderLap();
-    const warn = o.warnMs || (3200 - lap * 280);
+    const warn = Math.max(o.warnMs || (3200 - lap * 280), S.COMBAT.astMinWarnMs);
+    let x = o.x, z = o.z, targetId = 0;
+    if (x === undefined) {
+      // most rocks hunt a racer: lead their current velocity to impact time,
+      // plus a little scatter so a swerve still saves you
+      const alive = [...this.players.values()].filter(p => !p.finished && p.deadUntil < t);
+      if (alive.length && this.rng() < S.COMBAT.astTargetChance) {
+        const p = alive[(this.rng() * alive.length) | 0];
+        const lead = warn / 1000;
+        const sa = this.rng() * S.TAU, sr = 1.5 + this.rng() * 7;
+        x = p.x + Math.sin(p.yaw) * p.vf * lead + Math.cos(sa) * sr;
+        z = p.z + Math.cos(p.yaw) * p.vf * lead + Math.sin(sa) * sr;
+        targetId = p.id;
+      } else {
+        const a = this.rng() * S.TAU;
+        const r = S.trackRadius(a) + (this.rng() * 2 - 1) * 28;
+        x = Math.cos(a) * r; z = Math.sin(a) * r;
+      }
+    }
     const ast = {
       id: nextEntityId++, x, z,
       impactTs: t + warn,
       big: !!o.big, dead: false,
     };
     this.asteroids.push(ast);
-    this.broadcast({ t: 'astSpawn', id: ast.id, x, z, impactTs: ast.impactTs, big: ast.big });
+    this.broadcast({ t: 'astSpawn', id: ast.id, x, z, impactTs: ast.impactTs, big: ast.big, target: targetId });
   }
 
   resolveAsteroid(ast) {
@@ -278,7 +290,7 @@ class Room {
     this.broadcast({ t: 'astBoom', id: ast.id, x: ast.x, z: ast.z, big: ast.big, hits: hits.map(h => h.id) });
     for (const h of hits) {
       const p = this.players.get(h.id);
-      if (p) this.applyDamage(p, h.dmg, 'asteroid', 0, { kx: p.x - ast.x, kz: p.z - ast.z, mag: h.dmg / 8 });
+      if (p) this.applyDamage(p, h.dmg, 'asteroid', 0, { kx: p.x - ast.x, kz: p.z - ast.z, mag: h.dmg / 6, spin: 1 });
     }
   }
 
@@ -288,14 +300,15 @@ class Room {
     return n <= 1 ? 0 : (p.rank - 1) / (n - 1);
   }
 
-  useItem(p) {
+  useItem(p, slot) {
     const t = now();
     if (this.state !== 'race' || p.finished) return;
-    if (!p.item || t < p.useCooldownUntil || p.deadUntil > t) return;
-    const item = p.item;
-    p.item = null;
+    slot = clamp(slot | 0, 0, S.MAX_ITEMS - 1);
+    const item = p.items[slot];
+    if (!item || t < p.useCooldownUntil || p.deadUntil > t) return;
+    p.items.splice(slot, 1);
     p.useCooldownUntil = t + S.COMBAT.useCooldownMs;
-    this.broadcast({ t: 'itemUsed', id: p.id, item });
+    this.broadcast({ t: 'itemUsed', id: p.id, item, slot });
 
     switch (item) {
       case 'boost':
@@ -340,6 +353,7 @@ class Room {
       }
       case 'emp': {
         const victims = [];
+        let stole = false;
         for (const q of this.players.values()) {
           if (q.id === p.id || q.finished) continue;
           if (dist2(p.x, p.z, q.x, q.z) < S.COMBAT.empR * S.COMBAT.empR) {
@@ -347,6 +361,13 @@ class Room {
             q.empUntil = t + S.COMBAT.empImpairMs;
             victims.push(q.id);
             this.applyDamage(q, S.DMG.emp, 'emp', p.id);
+            // an EMP rips one item out of the first victim's rack
+            if (!stole && q.items.length && p.items.length < S.MAX_ITEMS) {
+              stole = true;
+              const loot = q.items.pop();
+              p.items.push(loot);
+              this.broadcast({ t: 'itemStolen', from: q.id, to: p.id, item: loot });
+            }
           }
         }
         this.broadcast({ t: 'empBlast', id: p.id, x: p.x, z: p.z, r: S.COMBAT.empR, victims });
@@ -396,9 +417,9 @@ class Room {
         const ax = aim.x + Math.sin(aim.yaw) * 55;
         const az = aim.z + Math.cos(aim.yaw) * 55;
         this.broadcast({ t: 'meteorWarn', by: p.id, x: ax, z: az });
-        for (let i = 0; i < 4; i++) {
-          const ang = this.rng() * S.TAU, rr = this.rng() * 22;
-          this.spawnAsteroid({ x: ax + Math.cos(ang) * rr, z: az + Math.sin(ang) * rr, warnMs: 2600 + i * 320, big: i === 0 });
+        for (let i = 0; i < 6; i++) {
+          const ang = this.rng() * S.TAU, rr = this.rng() * 18;
+          this.spawnAsteroid({ x: ax + Math.cos(ang) * rr, z: az + Math.sin(ang) * rr, warnMs: 2600 + i * 280, big: i === 0 });
         }
         break;
       }
@@ -484,7 +505,7 @@ class Room {
         if (q.id === m.owner && t < m.armedAt + 2000) continue; // owner grace
         if (dist2(m.x, m.z, q.x, q.z) < S.COMBAT.mineTriggerR * S.COMBAT.mineTriggerR) {
           this.broadcast({ t: 'mineBoom', id: m.id, x: m.x, z: m.z });
-          this.applyDamage(q, S.DMG.mine, 'mine', m.owner, { kx: q.x - m.x, kz: q.z - m.z, mag: 5, slip: 1500 });
+          this.applyDamage(q, S.DMG.mine, 'mine', m.owner, { kx: q.x - m.x, kz: q.z - m.z, mag: 9, spin: 1, slip: 1800 });
           this.mines.splice(i, 1);
           break;
         }
@@ -537,11 +558,12 @@ class Room {
         continue;
       }
       for (const p of this.players.values()) {
-        if (p.item || p.finished || p.deadUntil > t) continue;
+        if (p.items.length >= S.MAX_ITEMS || p.finished || p.deadUntil > t) continue;
         if (dist2(c.x, c.z, p.x, p.z) < S.CRATE_PICK_R * S.CRATE_PICK_R) {
           c.up = false; c.respawnAt = t + S.CRATE_RESPAWN_MS;
-          p.item = S.rollItem(this.rankT(p), this.rng);
-          this.broadcast({ t: 'crateTaken', id: c.id, by: p.id, item: p.item });
+          const item = S.rollItem(this.rankT(p), this.rng);
+          p.items.push(item);
+          this.broadcast({ t: 'crateTaken', id: c.id, by: p.id, item });
           break;
         }
       }
@@ -627,7 +649,7 @@ class Room {
       const dmg = r.kind === 'hrocket' ? S.DMG.hrocket : S.DMG.srocket;
       this.applyDamage(victim, dmg, r.kind, r.owner, {
         kx: victim.x - (r.x - Math.sin(r.yaw)), kz: victim.z - (r.z - Math.cos(r.yaw)),
-        mag: 6, spin: 1,
+        mag: 10, spin: 1,
       });
     }
   }
@@ -710,7 +732,7 @@ wss.on('connection', (ws) => {
         player.flags = (m.f | 0) & (S.F.DRIFT | S.F.AIR | S.F.LIGHTS);
         break;
       }
-      case 'use': if (room && player) room.useItem(player); break;
+      case 'use': if (room && player) room.useItem(player, m.slot); break;
       case 'ouch': {
         // client-reported environmental damage, clamped + rate-limited
         if (!room || !player || room.state !== 'race') return;
@@ -731,7 +753,7 @@ wss.on('connection', (ws) => {
         player.lastRamAt = t;
         const boosted = player.boostUntil > t;
         room.applyDamage(q, boosted ? S.DMG.ram * 1.6 : S.DMG.ram, 'ram', player.id, {
-          kx: q.x - player.x, kz: q.z - player.z, mag: boosted ? 5 : 3, slip: 900,
+          kx: q.x - player.x, kz: q.z - player.z, mag: boosted ? 8 : 5, slip: 900,
         });
         break;
       }
@@ -768,6 +790,7 @@ function joinPayload(room, p, rejoined) {
     serverNow: now(),
     urls: lanIPs().map(ip => `http://${ip}:${PORT}`),
     crates: room.crates.map(c => ({ id: c.id, up: c.up })),
+    myItems: p.items.slice(),
   };
 }
 

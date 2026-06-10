@@ -55,11 +55,26 @@
   #hpbar{ height:9px; background:rgba(255,255,255,.10); border-radius:4px; overflow:hidden; margin-top:5px; }
   #hpfill{ width:100%; height:100%; background:var(--green); transition:width .15s ease, background .3s; }
   #hpfill.low{ background:var(--amber); } #hpfill.crit{ background:var(--red); }
-  #itemslot{ margin-top:9px; display:flex; align-items:center; gap:10px; }
-  #itemicon{ width:38px; height:38px; border:1px solid var(--line); border-radius:6px;
-    display:flex; align-items:center; justify-content:center; font-size:19px; color:var(--amber);
+  #itemslot{ margin-top:9px; display:flex; align-items:center; gap:5px; }
+  .iticon{ width:30px; height:30px; border:1px solid var(--line); border-radius:6px;
+    display:flex; align-items:center; justify-content:center; font-size:15px; color:var(--amber);
     background:rgba(255,179,71,.06); }
-  #itemicon.empty{ color:var(--dim); background:transparent; }
+  .iticon.empty{ color:var(--dim); background:transparent; }
+  .iticon.sel{ border-color:var(--amber); box-shadow:0 0 7px rgba(255,179,71,.55);
+    background:rgba(255,179,71,.16); }
+  #itemname{ margin-top:4px; }
+
+  /* hit confirmation — pops near crosshair-height, amber, quick */
+  #hitmark{ position:fixed; left:50%; top:38%; transform:translateX(-50%) scale(.6);
+    font-size:26px; font-weight:700; letter-spacing:.12em; color:var(--amber);
+    text-shadow:0 0 14px rgba(255,179,71,.8); opacity:0; pointer-events:none; }
+  #hitmark.show{ animation:hitpop .65s ease-out; }
+  @keyframes hitpop{
+    0%{ opacity:0; transform:translateX(-50%) scale(.6); }
+    18%{ opacity:1; transform:translateX(-50%) scale(1.25); }
+    40%{ transform:translateX(-50%) scale(1); }
+    100%{ opacity:0; transform:translateX(-50%) translateY(-26px) scale(1); }
+  }
   #itemname{ font-size:12px; letter-spacing:.1em; }
   #shieldtag{ color:var(--cyan); display:none; }
   #conn{ margin-top:8px; font-size:10px; color:var(--dim); letter-spacing:.12em; }
@@ -188,6 +203,7 @@
   #t-fwd  { right:18px; bottom:148px; }
   #t-back { right:18px; bottom:72px; }
   #t-item { right:96px; bottom:110px; color:var(--amber); }
+  #t-cycle{ right:162px; bottom:84px; width:48px; height:48px; font-size:16px; color:var(--cyan); }
   #t-brake{ left:57px; bottom:158px; font-size:12px; letter-spacing:.1em; }
   @media (pointer:coarse){ #help{ display:none; } }
 </style>
@@ -210,12 +226,13 @@
   <div class="row" style="margin-top:0"><span class="lbl" id="pname">PILOT</span><span class="lbl" id="shieldtag">◉ SHIELD</span></div>
   <div id="hpbar"><div id="hpfill"></div></div>
   <div id="itemslot">
-    <div id="itemicon" class="empty">—</div>
-    <div>
-      <div class="lbl">Weapon · Shift</div>
-      <div id="itemname" class="val">NO PAYLOAD</div>
-    </div>
+    <div class="iticon empty" id="it0">—</div>
+    <div class="iticon empty" id="it1">—</div>
+    <div class="iticon empty" id="it2">—</div>
+    <div class="iticon empty" id="it3">—</div>
+    <div class="iticon empty" id="it4">—</div>
   </div>
+  <div class="lbl" id="itemname">NO PAYLOAD · Shift fire · Q/wheel swap</div>
   <div id="conn">LINK: OFFLINE</div>
 </div>
 
@@ -302,7 +319,9 @@
   <div class="tbtn" id="t-back"  data-k="back">▼</div>
   <div class="tbtn" id="t-brake" data-k="brake">DRIFT</div>
   <div class="tbtn" id="t-item">☄</div>
+  <div class="tbtn" id="t-cycle">⇄</div>
 </div>
+<div id="hitmark">✕ HIT</div>
 
 <script src="/lib/three.min.js"></script>
 <script>

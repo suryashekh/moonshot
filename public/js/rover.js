@@ -224,6 +224,10 @@
     if (k) { keys[k] = 1; e.preventDefault(); return; }
     if (e.code === 'KeyR') { if (G.net) G.net.send({ t: 'reqRespawn' }); }
     if (e.code === 'KeyL') { rig.setLights(!rig.lightsOn); }
+    if (e.code === 'KeyQ') { if (G.cycleItem) G.cycleItem(1); }
+    if (/^Digit[1-5]$/.test(e.code)) {
+      if (G.selectItem) G.selectItem(+e.code.slice(-1) - 1);
+    }
     if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
       if (G.useItem) G.useItem(); e.preventDefault();
     }
@@ -234,13 +238,21 @@
     if (k) { keys[k] = 0; e.preventDefault(); }
     if (e.code === 'Tab') { if (G.hud) G.hud.showScore(false); e.preventDefault(); }
   });
+  // mouse wheel flips through the weapon rack
+  window.addEventListener('wheel', (e) => {
+    if (G.state.phase !== 'race' || !G.cycleItem) return;
+    G.cycleItem(e.deltaY > 0 ? 1 : -1);
+  }, { passive: true });
 
   if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
     document.getElementById('touch').classList.add('on');
     document.querySelectorAll('.tbtn').forEach((btn) => {
       const k = btn.dataset.k;
-      if (!k) {   // item button has no movement key binding
-        btn.addEventListener('pointerdown', (e) => { if (G.useItem) G.useItem(); e.preventDefault(); });
+      if (!k) {   // non-movement buttons: fire selected item / cycle slots
+        const fn = btn.id === 't-cycle'
+          ? () => { if (G.cycleItem) G.cycleItem(1); }
+          : () => { if (G.useItem) G.useItem(); };
+        btn.addEventListener('pointerdown', (e) => { fn(); e.preventDefault(); });
         return;
       }
       const on  = (e) => { keys[k] = 1; e.preventDefault(); };
@@ -281,6 +293,7 @@
 
   /* ---------------- physics ---------------- */
   let ouchCooldown = 0;   // throttle damage reports
+  let ramCooldown = 0;    // throttle car-contact ram reports
 
   function physicsStep(dt) {
     const st = G.state;
@@ -366,8 +379,8 @@
 
     // --- Modifier-adjusted performance envelope
     const dmgFac = st.hp < 50 ? (0.55 + 0.45 * st.hp / 50) : 1;   // crippled rover
-    let maxSpeed = CFG.maxSpeed * dmgFac + (boostT ? 8 : 0);
-    let accel = CFG.engineAccel * (boostT ? 1.8 : 1);
+    let maxSpeed = CFG.maxSpeed * dmgFac + (boostT ? 11 : 0);
+    let accel = CFG.engineAccel * (boostT ? 2.2 : 1);
     let rollResist = CFG.rollResist * (zone === 'rough' ? 3.0 : 1);
 
     if (groundedPrev) {
@@ -452,14 +465,37 @@
 
     rover.odo += hSpeed * dt;
 
-    // --- ram detection (boost + contact with a remote)
-    if (boostT && G.remotes && st.phase === 'race' && now > ouchCooldown) {
+    // --- car-vs-car collision: hard separation + bounce + spin.
+    //     A hard hit also reports a ram so the server deals damage
+    //     (boost multiplies it server-side).
+    if (G.remotes && st.phase === 'race' && !(st.deadUntil > sNow) && st.invulnUntil < sNow) {
+      const CAR_R = S.COMBAT.carHitR;
       for (const r of G.remotes.values()) {
+        if (r.flags & (S.F.DEAD | S.F.FINISHED)) continue;
         const dx = rover.pos.x - r.x, dz = rover.pos.z - r.z;
-        if (dx * dx + dz * dz < 3.2 * 3.2 && hSpeed > 6) {
-          ouchCooldown = now + 900;
-          G.net.send({ t: 'ram', target: r.id });
-          break;
+        const d2 = dx * dx + dz * dz;
+        if (d2 > CAR_R * CAR_R || d2 < 1e-6) continue;
+        const d = Math.sqrt(d2), nx = dx / d, nz = dz / d;
+        // push out of overlap
+        rover.pos.x = r.x + nx * CAR_R;
+        rover.pos.z = r.z + nz * CAR_R;
+        // bounce off the closing velocity (relative to the remote's motion)
+        const rvx = rover.vel.x - (r.velX || 0), rvz = rover.vel.z - (r.velZ || 0);
+        const vn = rvx * nx + rvz * nz;
+        if (vn < 0) {
+          rover.vel.x -= nx * vn * 1.7;
+          rover.vel.z -= nz * vn * 1.7;
+          const impact = -vn;
+          rover.spinVel += (rover.vL >= 0 ? 1 : -1) * Math.min(impact * 0.16, 2.4);
+          if (impact > 2.0) {
+            G.dustBurst((rover.pos.x + r.x) / 2, rover.pos.y, (rover.pos.z + r.z) / 2, impact * 0.8);
+            G.beep(120, 140, 'square', Math.min(0.04 + impact * 0.008, 0.1));
+            if (G.addCamShake) G.addCamShake(Math.min(impact * 0.025, 0.25));
+          }
+          if (impact > 5 && now > ramCooldown && G.net) {
+            ramCooldown = now + 900;
+            G.net.send({ t: 'ram', target: r.id });
+          }
         }
       }
     }

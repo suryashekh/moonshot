@@ -11,7 +11,8 @@
   const elSpeed = $('speed'), elStatus = $('status'), elSlip = $('slipfill');
   const elAlt = $('alt'), elOdo = $('odo');
   const elHp = $('hpfill'), elHpbar = $('hpbar'), elShield = $('shieldtag');
-  const elIcon = $('itemicon'), elIname = $('itemname'), elSlot = $('itemslot');
+  const elIts = [$('it0'), $('it1'), $('it2'), $('it3'), $('it4')], elIname = $('itemname');
+  const elHit = $('hitmark');
   const elRank = $('rank'), elLap = $('lapline'), elTimers = $('timers');
   const elBest = $('rbest'), elCp = $('cpdist'), elConn = $('conn');
   const elPname = $('pname'), elFeed = $('feed'), elAlert = $('alert');
@@ -53,16 +54,17 @@
     elHpbar.classList.toggle('crit', hpPct < 0.25);
     elShield.style.display = st.shieldUntil > sNow ? 'inline-block' : 'none';
 
-    if (st.item) {
-      const it = S.ITEMS[st.item];
-      elIcon.textContent = it.icon;
-      elIname.textContent = it.name;
-      elSlot.classList.add('has');
-    } else {
-      elIcon.textContent = '—';
-      elIname.textContent = 'NO ITEM';
-      elSlot.classList.remove('has');
+    const sel = Math.min(st.itemSel | 0, Math.max(st.items.length - 1, 0));
+    for (let i = 0; i < elIts.length; i++) {
+      const it = st.items[i] ? S.ITEMS[st.items[i]] : null;
+      elIts[i].textContent = it ? it.icon : '—';
+      elIts[i].classList.toggle('empty', !it);
+      elIts[i].classList.toggle('sel', !!it && i === sel);
     }
+    const cur = st.items[sel] ? S.ITEMS[st.items[sel]] : null;
+    elIname.textContent = cur
+      ? cur.name + ' · Shift fire · Q/wheel swap'
+      : 'NO PAYLOAD · grab a crate';
 
     /* race panel */
     if (st.phase === 'race' || st.phase === 'end') {
@@ -117,6 +119,32 @@
     elDmg.classList.add('show');
   }
 
+  /* attacker feedback: your weapon connected */
+  const KIND_NAMES = {
+    srocket: 'ROCKET', hrocket: 'HOMING RKT', mine: 'MINE', emp: 'EMP',
+    ram: 'RAM', asteroid: 'METEOR',
+  };
+  function hitConfirm(dmg, kind) {
+    elHit.textContent = '−' + dmg + '  ' + (KIND_NAMES[kind] || 'HIT');
+    elHit.classList.remove('show');
+    void elHit.offsetWidth;
+    elHit.classList.add('show');
+    G.beep(1180, 60, 'square', 0.07);
+    setTimeout(() => G.beep(1560, 80, 'square', 0.06), 60);
+  }
+
+  /* takedown banner + streak counter (reset when you die) */
+  let streak = 0;
+  function takedown(victimName) {
+    streak++;
+    const tag = streak >= 3 ? ' — RAMPAGE ×' + streak : streak === 2 ? ' — DOUBLE!' : '';
+    alert('💥 TAKEDOWN: ' + victimName + tag, 2600);
+    G.beep(520, 90, 'sawtooth', 0.08);
+    setTimeout(() => G.beep(780, 90, 'sawtooth', 0.08), 90);
+    setTimeout(() => G.beep(1040, 160, 'sawtooth', 0.08), 180);
+  }
+  function resetStreak() { streak = 0; }
+
   function empHit(ms) {
     alert('⌁ EMP — SYSTEMS IMPAIRED', ms);
     document.body.classList.add('glitch');
@@ -156,5 +184,5 @@
     elScore.classList.add('show');
   }
 
-  G.hud = { update, feed, alert, lockOn, damageFlash, empHit, setConn, showScore };
+  G.hud = { update, feed, alert, lockOn, damageFlash, empHit, setConn, showScore, hitConfirm, takedown, resetStreak };
 })();

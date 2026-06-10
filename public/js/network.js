@@ -101,6 +101,8 @@
         if (m.rejoined && m.state === 'race') {
           st.phase = 'race';
           st.controlsLocked = false;
+          st.items = m.myItems || [];
+          st.itemSel = 0;
           G.enterGameView();
         }
         break;
@@ -137,7 +139,8 @@
         st.phase = 'countdown';
         st.controlsLocked = true;
         st.finished = false;
-        st.hp = 100; st.item = null;
+        st.hp = 100; st.items = []; st.itemSel = 0;
+        G.hud.resetStreak();
         st.lap = 1; st.nextGate = 0; st.bestLap = 0;
         st.shieldUntil = st.empUntil = st.boostUntil = st.gstabUntil = 0;
         st.deadUntil = st.invulnUntil = 0;
@@ -219,7 +222,14 @@
         break;
 
       /* asteroids */
-      case 'astSpawn': G.onAstSpawn(m); break;
+      case 'astSpawn':
+        G.onAstSpawn(m);
+        if (m.target === st.myId) {
+          G.hud.alert('⚠ ASTEROID LOCK — MOVE!', 1800);
+          G.beep(980, 110, 'square', 0.08);
+          setTimeout(() => G.beep(980, 110, 'square', 0.08), 180);
+        }
+        break;
       case 'astBoom':  G.onAstBoom(m);  break;
       case 'astKilled': {
         G.onAstKilled(m);
@@ -236,6 +246,7 @@
       case 'crateTaken': G.onCrateTaken(m); break;
       case 'crateUp':    G.onCrateUp(m);    break;
       case 'itemUsed':   G.onItemUsed(m);   break;
+      case 'itemStolen': G.onItemStolen(m); break;
       case 'fx':         G.onFx(m);         break;
       case 'rocket':     G.onRocket(m);     break;
       case 'rocketBoom': G.onRocketBoom(m); break;
@@ -254,6 +265,11 @@
           G.hud.damageFlash();
           G.applyKnockback(m.fx);
           if (G.addCamShake) G.addCamShake(0.22);
+        } else if (m.src === st.myId) {
+          // my weapon connected — instant feedback
+          G.hud.hitConfirm(m.dmg, m.kind);
+          const v = G.remotes.get(m.id);
+          if (v) G.hud.feed('✕ you hit ' + v.name + ' −' + m.dmg);
         }
         break;
       }
@@ -265,8 +281,11 @@
         G.hud.feed('💥 ' + vName + ' destroyed by ' + bName);
         if (m.victim === st.myId) {
           st.deadUntil = G.serverNow() + m.respawnIn;
+          G.hud.resetStreak();
           G.boom(0.2);
           G.explosion(G.rover.pos.x, G.rover.pos.z, 1.6);
+        } else if (m.by === st.myId) {
+          G.hud.takedown(vName);
         }
         break;
       }

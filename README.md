@@ -30,7 +30,9 @@ Port defaults to `3000`; override with `PORT=8080 node server/server.js`.
 | S / ↓ | Brake / reverse |
 | A / D or ← / → | Steer |
 | Space | Handbrake drift |
-| **Shift** | Use held item/weapon |
+| **Shift** | Fire selected weapon |
+| **Q / mouse wheel** | Swap selected weapon slot |
+| **1–5** | Select weapon slot directly |
 | Tab (hold) | Scoreboard |
 | R | Respawn at last checkpoint |
 | L | Headlights |
@@ -40,15 +42,16 @@ Touch controls (steer / throttle / brake / drift / item) appear automatically on
 ## Gameplay
 
 - **Race**: 3 laps × 10 gates on a winding ring track. Gate radius tightens each lap. Cyan = your next gate, amber = others.
-- **Asteroids**: warning circles (yellow → red) mark impacts. Direct hit = destroyed; near miss = knockback + damage. Frequency ramps with the leader's lap; lap 3 brings meteor showers and reduced visibility.
+- **Asteroids**: most rocks *hunt a racer* — the server leads your velocity to the impact point, with a little scatter so a hard swerve saves you. Warning circles (yellow → red) mark impacts; a rock locked on YOU pulses red immediately and triggers a "⚠ ASTEROID LOCK" alert. Direct hit = destroyed → respawn at your last gate; near miss = knockback + damage. Frequency ramps with the leader's lap; lap 3 brings meteor showers and reduced visibility.
+- **Car contact**: rovers collide for real — push, bounce, spin. Hard contact deals ram damage; do it while boosting for a heavier shove.
 - **Hazards**: solar flares (HUD glitch + whiteout), moonquakes (steering noise + shake), dust storms (fog), slip/rough zones, low-gravity jump pads.
 - **Damage**: rocks, hard landings, weapons, asteroids. Below 50 HP your top speed drops. At 0 HP you respawn at your last gate after 3.5 s with 3 s of invulnerability.
-- **Items** (crates respawn ~11 s; drop rates are rank-weighted — leaders get defensive/common items, trailing players get stronger ones):
+- **Items** — hoard up to **5 at once** (crates respawn ~7 s; drop rates are rank-weighted — leaders get defensive/common items, trailing players get stronger ones). Shift fires the highlighted slot; Q / wheel / 1–5 to swap. Landing a hit pops a damage marker; destroying someone scores a TAKEDOWN (streaks tracked):
   - *Common*: Speed Boost, Repair, Shield
   - *Uncommon*: Straight Rocket, Lunar Mine, Gravity Trap
-  - *Rare*: Homing Rocket (with lock-on warning), EMP Pulse, Decoy Flare
-  - *Legendary*: Meteor Strike (targets ahead of the best opponent)
-- **Ramming**: hold Boost into an opponent for a shove + minor damage.
+  - *Rare*: Homing Rocket (with lock-on warning), EMP Pulse (also **steals an item** from a victim), Decoy Flare
+  - *Legendary*: Meteor Strike (6 rocks ahead of the best opponent)
+- **Ramming**: any hard contact shoves + damages; do it while boosting for a much bigger hit.
 
 ## Architecture
 
@@ -74,4 +77,5 @@ Terrain is generated from a fixed seed, so every client and the server compute i
 node server/server.js &      # in one shell
 node test/smoke.js           # 2 bots race: gates, laps, rock damage, asteroids
 node test/itemtest.js        # crate pickup → Shift-use → weapon broadcast
+node test/multitest.js       # multi-slot inventory, slot use, targeted asteroids
 ```

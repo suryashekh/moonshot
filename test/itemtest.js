@@ -1,5 +1,5 @@
 const WebSocket = require('ws');
-const S = require('/home/claude/lunar-rover-race/shared/constants.js');
+const S = require('../shared/constants.js');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function until(fn, ms, what){ const t0=Date.now(); while(Date.now()-t0<ms){ if(fn()) return; await sleep(40);} throw new Error('timeout: '+what); }
 (async () => {
