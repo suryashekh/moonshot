@@ -72,8 +72,9 @@
     }
     return out;
   })();
-  const CRATE_RESPAWN_MS = 11000;
+  const CRATE_RESPAWN_MS = 7000;
   const CRATE_PICK_R = 4.0;
+  const MAX_ITEMS = 5;            // inventory slots per rover
 
   /* ---------- items -------------------------------------------
      tier: 0 common, 1 uncommon, 2 rare, 3 legendary             */
@@ -118,31 +119,34 @@
     maxHp: 100,
     asteroidDirect: 100,
     asteroidNearMax: 40,
-    asteroidDirectR: 4.0,
+    asteroidDirectR: 4.5,
     asteroidShockR: 14.0,
     hrocket: 45,
     srocket: 35,
-    mine: 30,
+    mine: 35,
     emp: 6,
-    ram: 8,
+    ram: 12,
     rockMax: 7,        // clamp on client-reported rock hits
     landingMax: 16,    // clamp on client-reported hard landings
   };
 
   const COMBAT = {
-    useCooldownMs: 1300,
-    srocketSpeed: 38, srocketLifeMs: 2400, srocketHitR: 2.3,
-    hrocketSpeed: 29, hrocketLifeMs: 6500, hrocketHitR: 2.8, hrocketTurn: 2.3,
-    mineArmMs: 1000, mineLifeMs: 45000, mineTriggerR: 3.2,
-    empR: 18, empImpairMs: 3000,
+    useCooldownMs: 500,
+    srocketSpeed: 48, srocketLifeMs: 3000, srocketHitR: 2.8,
+    hrocketSpeed: 34, hrocketLifeMs: 6500, hrocketHitR: 2.8, hrocketTurn: 3.2,
+    mineArmMs: 1000, mineLifeMs: 45000, mineTriggerR: 4.2,
+    empR: 26, empImpairMs: 3500,
     trapR: 7.5, trapLifeMs: 25000,
     shieldMs: 10000,
-    boostMs: 3500,
+    boostMs: 4500,
     gstabMs: 5000,
     decoyMs: 4000,
     respawnMs: 3500,
     invulnMs: 3000,
     repairAmount: 40,
+    carHitR: 2.7,           // car-vs-car collision radius
+    astTargetChance: 0.75,  // odds a rock hunts a racer vs random track point
+    astMinWarnMs: 2300,     // never less dodge time than this
   };
 
   /* ---------- terrain hazard zones (fixed, on the ring) -------- */
@@ -192,7 +196,7 @@
 
   return {
     TAU, WORLD, trackRadius, GATE_COUNT, gatePositions, gateRadius,
-    CRATES, CRATE_RESPAWN_MS, CRATE_PICK_R,
+    CRATES, CRATE_RESPAWN_MS, CRATE_PICK_R, MAX_ITEMS,
     ITEMS, rollItem, DMG, COMBAT, ZONES, JUMP_PADS, zoneAt,
     NET, PLAYER_COLORS, F, mulberry32,
   };

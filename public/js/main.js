@@ -129,7 +129,7 @@
     );
     camera.lookAt(camLook);
 
-    const boost = G.state.boostUntil > G.serverNow() ? 8 : 0;
+    const boost = G.state.boostUntil > G.serverNow() ? 11 : 0;
     const fovT = 62 + clamp((hSpeed - 5 + boost) / 9, 0, 1) * 11;
     if (Math.abs(camera.fov - fovT) > 0.05) {
       camera.fov = lerp(camera.fov, fovT, 1 - Math.exp(-3 * dt));

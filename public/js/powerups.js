@@ -62,7 +62,10 @@
       G.dustBurst(o.x, o.gy, o.z, 2.5);
     }
     if (m.by === G.state.myId) {
-      G.state.item = m.item;
+      const st = G.state;
+      if (st.items.length < S.MAX_ITEMS) st.items.push(m.item);
+      const it = S.ITEMS[m.item];
+      if (G.hud) G.hud.feed('▣ + ' + it.name + '  [' + st.items.length + '/' + S.MAX_ITEMS + ']');
       G.beep(660, 90, 'triangle', 0.07);
       setTimeout(() => G.beep(990, 120, 'triangle', 0.07), 100);
     }
@@ -76,17 +79,51 @@
   /* item use → just tell the server; it validates cooldown + inventory */
   let lastUse = 0;
   G.useItem = function () {
+    const st = G.state;
     const now = performance.now();
-    if (!G.state.item || now - lastUse < 350) return;
-    if (G.state.phase !== 'race' || G.state.controlsLocked) return;
+    st.itemSel = Math.min(st.itemSel, Math.max(st.items.length - 1, 0));
+    if (!st.items.length || now - lastUse < 200) return;
+    if (st.phase !== 'race' || st.controlsLocked) return;
     lastUse = now;
-    G.net.send({ t: 'use' });
+    G.net.send({ t: 'use', slot: st.itemSel });
+  };
+
+  G.cycleItem = function (dir) {
+    const st = G.state;
+    if (st.items.length < 2) return;
+    st.itemSel = (st.itemSel + (dir || 1) + st.items.length) % st.items.length;
+    G.beep(440, 40, 'square', 0.04);
+  };
+
+  G.selectItem = function (i) {
+    const st = G.state;
+    if (i < st.items.length) { st.itemSel = i; G.beep(440, 40, 'square', 0.04); }
   };
 
   G.onItemUsed = function (m) {
     if (m.id === G.state.myId) {
-      G.state.item = null;
+      const st = G.state;
+      st.items.splice(Math.min(m.slot | 0, st.items.length - 1), 1);
+      st.itemSel = Math.min(st.itemSel, Math.max(st.items.length - 1, 0));
       G.beep(520, 80, 'square', 0.05);
+    }
+  };
+
+  /* EMP loot steal */
+  G.onItemStolen = function (m) {
+    const st = G.state;
+    if (m.from === st.myId) {
+      st.items.pop();
+      st.itemSel = Math.min(st.itemSel, Math.max(st.items.length - 1, 0));
+      if (G.hud) G.hud.alert('⌁ ITEM STOLEN — ' + S.ITEMS[m.item].name);
+      G.beep(220, 250, 'sawtooth', 0.07);
+    } else if (m.to === st.myId) {
+      if (st.items.length < S.MAX_ITEMS) st.items.push(m.item);
+      if (G.hud) G.hud.feed('⌁ stole ' + S.ITEMS[m.item].name);
+      G.beep(880, 90, 'triangle', 0.06);
+    } else if (G.hud) {
+      const f = G.remotes.get(m.from), to = G.remotes.get(m.to);
+      G.hud.feed('⌁ ' + (to ? to.name : '?') + ' stole ' + S.ITEMS[m.item].name + ' from ' + (f ? f.name : '?'));
     }
   };
 

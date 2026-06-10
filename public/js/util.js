@@ -131,7 +131,7 @@ window.G = {};
     myId: 0, myName: 'PILOT', myColor: 0x4fd2ff, hostId: 0,
     raceStartTs: 0, serverOffset: 0, rtt: 0,
     nextGate: 0, lap: 1, rank: 1, bestLap: 0, finished: false,
-    hp: 100, item: null, controlsLocked: true,
+    hp: 100, items: [], itemSel: 0, controlsLocked: true,
     shieldUntil: 0, empUntil: 0, boostUntil: 0, gstabUntil: 0,
     invulnUntil: 0, deadUntil: 0, decoyUntil: 0,
     quakeUntil: 0, stormUntil: 0, flareUntil: 0,

@@ -42,6 +42,7 @@
       this.normal = new THREE.Vector3(0, 1, 0);
       this.emitter = { vx: 0, vz: 0, vL: 0, grounded: true, braking: false, dustAccum: 0 };
       this.prevX = 0; this.prevZ = 0;
+      this.velX = 0; this.velZ = 0;
       this.trackPrev = null;
       this.lightsWere = false;
     }
@@ -82,6 +83,7 @@
       const vz = (z - this.prevZ) / Math.max(dt, 1e-3);
       this.prevX = x; this.prevZ = z;
       this.x = x; this.y = y; this.z = z; this.yaw = yaw; this.vf = vf;
+      this.velX = vx; this.velZ = vz;   // for local car-vs-car collision response
 
       const gy = G.terrainHeight(x, z);
       const grounded = (this.flags & S.F.AIR) === 0;

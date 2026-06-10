@@ -48,6 +48,7 @@
 
     live.set(m.id, {
       id: m.id, x: m.x, z: m.z, impactTs: m.impactTs, big: m.big,
+      mine: m.target === G.state.myId,   // locked onto MY rover
       ring, disc, rock, size,
       gy: G.terrainHeight(m.x, m.z),
       startY: 150 + Math.random() * 40,
@@ -87,8 +88,10 @@
     for (const a of live.values()) {
       const tLeft = a.impactTs - sNow;
 
-      // warning ring: yellow → red pulse, faster as impact nears
-      const u = G.clamp(1 - tLeft / 5000, 0, 1);
+      // warning ring: yellow → red pulse, faster as impact nears;
+      // rocks locked on ME start hot so the threat reads instantly
+      let u = G.clamp(1 - tLeft / 5000, 0, 1);
+      if (a.mine) u = Math.max(u, 0.65);
       const pulse = 0.55 + 0.45 * Math.sin(performance.now() * (0.006 + u * 0.02));
       a.ring.material.color.setRGB(1, 0.88 - 0.7 * u, 0.3 - 0.25 * u);
       a.ring.material.opacity = pulse;
