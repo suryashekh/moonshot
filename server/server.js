@@ -203,7 +203,7 @@ class Room {
         this.raceStartTs = now();
         const t0 = this.raceStartTs;
         for (const p of this.players.values()) p.lapStartTs = t0;
-        this.nextAsteroidAt = t0 + 8000;
+        this.nextAsteroidAt = t0 + 12000;
         this.nextShowerAt = 0;
         this.nextHazardAt = t0 + 20000;
         this.nextAlienAt = t0 + 25000;
@@ -770,21 +770,22 @@ class Room {
       if (t >= a.impactTs) { this.resolveAsteroid(a); this.asteroids.splice(i, 1); }
     }
 
-    /* asteroid scheduler (difficulty ramps with leader lap) */
+    /* asteroid scheduler (difficulty ramps with leader lap, but sparse —
+       rocks should be events you dodge, not weather) */
     const lap = this.leaderLap();
     if (t >= this.nextAsteroidAt) {
       this.spawnAsteroid();
-      const base = lap === 1 ? [6500, 10000] : lap === 2 ? [4000, 6500] : [2500, 4500];
+      const base = lap === 1 ? [11000, 16000] : lap === 2 ? [7500, 11500] : [5000, 8000];
       this.nextAsteroidAt = t + base[0] + this.rng() * (base[1] - base[0]);
-      if (lap === 2 && this.rng() < 0.3) this.spawnAsteroid();
+      if (lap === 2 && this.rng() < 0.15) this.spawnAsteroid();
     }
     if (lap >= 3) {
-      if (!this.nextShowerAt) this.nextShowerAt = t + 12000;
+      if (!this.nextShowerAt) this.nextShowerAt = t + 18000;
       if (t >= this.nextShowerAt) {
         this.broadcast({ t: 'shower' });
-        const n = 5 + (this.rng() * 4) | 0;
+        const n = 3 + (this.rng() * 3) | 0;
         for (let i = 0; i < n; i++) this.spawnAsteroid({ warnMs: 2400 + this.rng() * 1800 });
-        this.nextShowerAt = t + 20000 + this.rng() * 10000;
+        this.nextShowerAt = t + 32000 + this.rng() * 15000;
       }
     }
 

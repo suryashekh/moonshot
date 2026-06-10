@@ -52,6 +52,9 @@ Touch controls (steer / throttle / brake / drift / item) appear automatically on
 - **Map + standings**: the minimap (top right) shows the track, gates, players, aliens and incoming asteroids; a live standings list inside the same panel shows everyone's rank and lap at all times, with the killfeed below.
 - **Crate signs**: every pod advertises its content — the item's icon and name float above it, tinted by tier (cyan common / green uncommon / pink rare / gold legendary) — so you pick your line through the crates you actually want.
 - **Hazards**: solar flares (HUD glitch + whiteout), moonquakes (steering noise + shake), dust storms (fog), slip/rough zones, low-gravity jump pads.
+- **Ramps & overdrive strips**: three amber launch ramps fling you airborne when hit at speed; cyan overdrive strips raise your top speed while you're on them (and deliberately overlap the jump pads — hit a pad at overdrive speed in low-g and you FLY).
+- **Air stunts**: while airborne, steer to spin and throttle to flip. Bank enough rotation and land it for a 2.4 s overdrive reward ("STUNT LANDED!"). Bail by landing flat — no penalty, no reward.
+- **Never get lost**: a cyan arrow floats over your rover pointing at your next gate, the next gate carries a sky-high beacon beam, and driving away from it at speed flashes a big red ⟲ WRONG WAY banner.
 - **Damage**: rocks, hard landings, weapons, asteroids. Below 50 HP your top speed drops. At 0 HP you respawn at your last gate after 3.5 s with 3 s of invulnerability.
 - **Items** — hoard up to **5 at once** (crates respawn ~7 s; drop rates are rank-weighted — leaders get defensive/common items, trailing players get stronger ones). Shift fires the highlighted slot; Q / wheel / 1–5 to swap. Landing a hit pops a damage marker; destroying someone scores a TAKEDOWN (streaks tracked):
   - *Common*: Speed Boost, Repair, Shield

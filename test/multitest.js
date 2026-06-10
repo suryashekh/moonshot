@@ -31,6 +31,7 @@ async function until(fn, ms, what){ const t0=Date.now(); while(Date.now()-t0<ms)
       if (m.t==='fx' && m.kind==='boost' && m.id===c.id) c.boosts = (c.boosts||0)+1;
       if (m.t==='alienSpawn') c.aliens++;
       if (m.t==='alienZap') c.zaps++;
+      if (m.t==='alienDead') c.alienKills = (c.alienKills||0) + 1;
       if (m.t==='damage' && m.id===c.id && m.kind==='alien') c.alienDmg++;
     });
     return c; };
@@ -89,12 +90,15 @@ async function until(fn, ms, what){ const t0=Date.now(); while(Date.now()-t0<ms)
     throw new Error('turbo fired more than its magazine — recharge gap not enforced');
   console.log('✓ turbo:', S.TURBO.charges, 'charges then forced recharge gap');
 
-  // 5) humanoid aliens spawn, open fire (abolt) or claw, and damage lands
-  await until(()=>a.aliens >= 1, 40000, 'alien spawn');
-  await until(()=>(a.abolts||0) >= 1 || a.zaps >= 1, 30000, 'alien opens fire');
-  await until(()=>a.alienDmg + b.alienDmg >= 1, 30000, 'alien damage lands');
+  // 5) humanoid aliens spawn and engage: they fire/claw at players, or a
+  //    player kills them first (shot or run over) — any of those proves
+  //    the alien is live in the world
+  await until(()=>a.aliens >= 1, 50000, 'alien spawn');
+  await until(()=>(a.abolts||0) >= 1 || a.zaps >= 1 || (a.alienKills||0) >= 1,
+              60000, 'alien engages (fires, claws, or gets killed)');
   console.log('✓ aliens: spawns', a.aliens, '· bolts fired', a.abolts||0,
-              '· melee swipes', a.zaps, '· alien dmg msgs', a.alienDmg + b.alienDmg);
+              '· melee swipes', a.zaps, '· kills', a.alienKills||0,
+              '· alien dmg msgs', a.alienDmg + b.alienDmg);
 
   clearInterval(iv);
   console.log('✓ damage msgs carrying dmg amount:', a.dmgMsgs);

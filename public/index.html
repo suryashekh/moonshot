@@ -35,6 +35,8 @@
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
     pointer-events:none;
   }
+  /* race HUD panels are display:none until the race view turns them on */
+  #race.show, #minimapPanel.show, #vitals.show{ display:block; }
   .lbl{ font-size:10px; letter-spacing:.14em; color:var(--dim); text-transform:uppercase; }
   .val{ font-size:13px; color:var(--ink); }
   .rule{ height:1px; background:var(--line); margin:9px 0; }
@@ -86,6 +88,14 @@
   .strow span{ flex:1; letter-spacing:.06em; }
   .strow em{ font-style:normal; color:var(--dim); font-size:10px; }
   .strow.me span{ text-shadow:0 0 8px currentColor; }
+
+  /* wrong-way banner — big, red, impossible to miss */
+  #wrongway{ position:fixed; left:50%; top:26%; transform:translateX(-50%);
+    font-size:34px; font-weight:700; letter-spacing:.22em; color:#ff5040;
+    text-shadow:0 0 22px rgba(255,80,64,.9); display:none; pointer-events:none;
+    animation:wrongpulse .5s ease-in-out infinite alternate; }
+  #wrongway.show{ display:block; }
+  @keyframes wrongpulse{ from{ opacity:.55; } to{ opacity:1; } }
 
   /* hit confirmation — pops near crosshair-height, amber, quick */
   #hitmark{ position:fixed; left:50%; top:38%; transform:translateX(-50%) scale(.6);
@@ -354,6 +364,7 @@
   <div class="tbtn" id="t-turbo">»»</div>
 </div>
 <div id="hitmark">✕ HIT</div>
+<div id="wrongway">⟲ WRONG WAY</div>
 
 <script src="/lib/three.min.js"></script>
 <script>

@@ -288,6 +288,7 @@
         const r = SHARED.trackRadius(a) + (rng() * 2 - 1) * 26;
         const x = Math.cos(a) * r, z = Math.sin(a) * r;
         if (s.kind === 'slip') paintPatch(x, z, 10 + rng() * 8, 'rgba(210,225,255,0.10)');
+        else if (s.kind === 'speed') paintPatch(x, z, 9 + rng() * 6, 'rgba(60,220,255,0.14)');
         else paintPatch(x, z, 7 + rng() * 7, 'rgba(0,0,0,0.16)');
       }
     }

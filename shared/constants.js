@@ -197,11 +197,37 @@
     { kind: 'slip',  a0: 4.50, a1: 5.00 },
     { kind: 'rough', a0: 3.30, a1: 4.10 },  // boulder washboard
     { kind: 'rough', a0: 0.10, a1: 0.55 },
+    // overdrive strips — deliberately overlap the jump pads below:
+    // hit the pad at overdrive speed in low-g and you FLY
+    { kind: 'speed', a0: 0.60, a1: 0.95 },
+    { kind: 'speed', a0: 2.50, a1: 2.85 },
+    { kind: 'speed', a0: 5.10, a1: 5.55 },
   ];
   // circular low-gravity jump pads
   const JUMP_PADS = [0.75, 2.65, 5.45].map(a => ({
     a, x: Math.cos(a) * trackRadius(a), z: Math.sin(a) * trackRadius(a), r: 13, gscale: 0.42,
   }));
+
+  /* ---------- launch ramps (drive on fast → get air → do stunts) */
+  const RAMPS = [2.95, 4.30, 6.05].map(a => {
+    const r = trackRadius(a);
+    return {
+      a, x: Math.cos(a) * r, z: Math.sin(a) * r,
+      heading: Math.atan2(-Math.sin(a) * r, Math.cos(a) * r),  // track tangent
+      r: 5.5,          // trigger radius
+      minSpeed: 8,     // need to be moving to launch
+      kick: 0.55,      // vel.y += hSpeed * kick (clamped)
+    };
+  });
+
+  /* ---------- air stunts (client physics; landing reward) ------- */
+  const STUNT = {
+    spinRate: 2.8,    // rad/s yaw spin from steering while airborne
+    flipRate: 3.6,    // rad/s pitch flip from throttle while airborne
+    minAirS: 0.45,    // must be airborne at least this long
+    minTrick: 2.6,    // accumulated spin+flip radians to count as a stunt
+    boostMs: 2400, boostSpeed: 8,   // clean landing reward
+  };
 
   function zoneAt(x, z) {
     const a = (Math.atan2(z, x) + TAU) % TAU;
@@ -238,7 +264,7 @@
   return {
     TAU, WORLD, trackRadius, GATE_COUNT, gatePositions, gateRadius,
     CRATES, CRATE_RESPAWN_MS, CRATE_PICK_R, MAX_ITEMS,
-    ITEMS, rollItem, DMG, COMBAT, GUN, TURBO, ALIEN, ZONES, JUMP_PADS, zoneAt,
+    ITEMS, rollItem, DMG, COMBAT, GUN, TURBO, ALIEN, ZONES, JUMP_PADS, RAMPS, STUNT, zoneAt,
     NET, PLAYER_COLORS, F, mulberry32,
   };
 });
