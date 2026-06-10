@@ -166,11 +166,19 @@
     speed: 70, lifeMs: 1100, hitR: 2.6, dmg: 8,
   };
 
+  /* ---------- turbo (everyone; same magazine+recharge model) ---- */
+  const TURBO = {
+    charges: 3,          // magazine
+    useGapMs: 600,       // min ms between burns
+    rechargeMs: 7000,    // empty → full again (the "gap")
+    burstMs: 1700,       // speed burst per charge
+  };
+
   /* ---------- aliens (humanoid hostiles) ------------------------ */
   const ALIEN = {
-    maxAlive: 3,
-    spawnMsMin: 10000, spawnMsMax: 18000,
-    lifeMs: 45000,       // gives up and leaves after this
+    maxAlive: 1,                          // a rare event, not a horde
+    spawnMsMin: 50000, spawnMsMax: 90000,
+    lifeMs: 30000,       // gives up and leaves after this
     hp: 30,
     speed: 11,           // chases, but a healthy rover can outrun it
     aggroR: 120,         // hunts the nearest racer inside this
@@ -189,11 +197,45 @@
     { kind: 'slip',  a0: 4.50, a1: 5.00 },
     { kind: 'rough', a0: 3.30, a1: 4.10 },  // boulder washboard
     { kind: 'rough', a0: 0.10, a1: 0.55 },
+    // overdrive strips — deliberately overlap the jump pads below:
+    // hit the pad at overdrive speed in low-g and you FLY
+    { kind: 'speed', a0: 0.60, a1: 0.95 },
+    { kind: 'speed', a0: 2.50, a1: 2.85 },
+    { kind: 'speed', a0: 5.10, a1: 5.55 },
   ];
   // circular low-gravity jump pads
   const JUMP_PADS = [0.75, 2.65, 5.45].map(a => ({
     a, x: Math.cos(a) * trackRadius(a), z: Math.sin(a) * trackRadius(a), r: 13, gscale: 0.42,
   }));
+
+  /* ---------- launch ramps (drive UP one fast → get air) -------- */
+  const RAMPS = [2.95, 4.30, 6.05].map(a => {
+    const r = trackRadius(a);
+    return {
+      a, x: Math.cos(a) * r, z: Math.sin(a) * r,
+      heading: Math.atan2(-Math.sin(a) * r, Math.cos(a) * r),  // track tangent
+      r: 5.5,          // trigger radius
+      minSpeed: 8,     // need to be moving to launch
+      minAlign: 0.55,  // must be driving along the ramp, not clipping it sideways
+      kick: 0.42,      // vel.y += hSpeed * kick (clamped)
+      w: 9, len: 10, h: 3.0,   // wedge geometry
+    };
+  });
+
+  /* ---------- air handling & stunts (client physics) ------------
+     In the air: steering = gentle yaw, throttle = AIR CONTROL (nudges
+     your velocity, with a small body tilt — no tumbling). Banked yaw
+     spin pays out a boost on landing.                               */
+  const STUNT = {
+    spinRate: 0.45,   // rad/s yaw in air: one full turn needs a BIG ramp jump
+    spinDelayS: 0.4,  // no spin at all until this long airborne (kills hop-twitch)
+    airCtrl: 1.2,     // m/s² horizontal nudge from throttle in air
+    tiltMax: 0.06,    // max visual pitch tilt from air control (rad)
+    tiltRate: 2.2,    // how fast the tilt eases toward its target
+    minAirS: 0.6,     // must be airborne at least this long
+    minTrick: 1.0,    // banked spin radians to count as a stunt
+    boostMs: 2400, boostSpeed: 8,   // clean landing reward
+  };
 
   function zoneAt(x, z) {
     const a = (Math.atan2(z, x) + TAU) % TAU;
@@ -230,7 +272,7 @@
   return {
     TAU, WORLD, trackRadius, GATE_COUNT, gatePositions, gateRadius,
     CRATES, CRATE_RESPAWN_MS, CRATE_PICK_R, MAX_ITEMS,
-    ITEMS, rollItem, DMG, COMBAT, GUN, ALIEN, ZONES, JUMP_PADS, zoneAt,
+    ITEMS, rollItem, DMG, COMBAT, GUN, TURBO, ALIEN, ZONES, JUMP_PADS, RAMPS, STUNT, zoneAt,
     NET, PLAYER_COLORS, F, mulberry32,
   };
 });

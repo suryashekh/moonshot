@@ -13,7 +13,7 @@
   const elHp = $('hpfill'), elHpbar = $('hpbar'), elShield = $('shieldtag');
   const elIts = [$('it0'), $('it1'), $('it2'), $('it3'), $('it4')], elIname = $('itemname');
   const elHit = $('hitmark');
-  const elGun = $('gunbar'), elStand = $('standings');
+  const elGun = $('gunbar'), elTurbo = $('turbobar'), elStand = $('standings');
   const elRank = $('rank'), elLap = $('lapline'), elTimers = $('timers');
   const elBest = $('rbest'), elCp = $('cpdist'), elConn = $('conn');
   const elPname = $('pname'), elFeed = $('feed'), elAlert = $('alert');
@@ -82,6 +82,24 @@
         for (let i = 0; i < S.GUN.shots; i++) pips += '<i class="' + (i < g.shots ? 'on' : '') + '"></i>';
         elGun.innerHTML = '<span class="gunlbl">F BLASTER</span>' + pips;
         elGun.classList.remove('recharge');
+      }
+    }
+
+    /* turbo charges — same pip mechanic as the blaster */
+    if (elTurbo) {
+      const tb = G.turbo, sN = G.serverNow();
+      const recharging = tb.charges <= 0 && tb.rechargeAt > sN;
+      if (recharging) {
+        const u = clamp(1 - (tb.rechargeAt - sN) / S.TURBO.rechargeMs, 0, 1);
+        elTurbo.innerHTML = '<span class="gunlbl">⌁ RECHARGE</span><span class="gunfill" style="width:' +
+          Math.round(u * 100) + '%"></span>';
+        elTurbo.classList.add('recharge');
+      } else {
+        if (tb.charges <= 0) tb.charges = S.TURBO.charges;   // recharge elapsed
+        let pips = '';
+        for (let i = 0; i < S.TURBO.charges; i++) pips += '<i class="' + (i < tb.charges ? 'on' : '') + '"></i>';
+        elTurbo.innerHTML = '<span class="gunlbl">E TURBO</span>' + pips;
+        elTurbo.classList.remove('recharge');
       }
     }
 

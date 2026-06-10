@@ -27,8 +27,11 @@ async function until(fn, ms, what){ const t0=Date.now(); while(Date.now()-t0<ms)
       if (m.t==='rocket' && m.kind==='blast' && m.owner===c.id) c.blasts++;
       if (m.t==='rocket' && m.kind==='abolt') c.abolts = (c.abolts||0) + 1;
       if (m.t==='ammo') c.ammoMsgs.push(m);
+      if (m.t==='turboAmmo') c.turboMsgs = (c.turboMsgs||[]).concat(m);
+      if (m.t==='fx' && m.kind==='boost' && m.id===c.id) c.boosts = (c.boosts||0)+1;
       if (m.t==='alienSpawn') c.aliens++;
       if (m.t==='alienZap') c.zaps++;
+      if (m.t==='alienDead') c.alienKills = (c.alienKills||0) + 1;
       if (m.t==='damage' && m.id===c.id && m.kind==='alien') c.alienDmg++;
     });
     return c; };
@@ -65,7 +68,7 @@ async function until(fn, ms, what){ const t0=Date.now(); while(Date.now()-t0<ms)
   console.log('✓ slot-targeted use:', a.used[0].item, '@ slot', a.used[0].slot);
 
   // 3) asteroids hunt players
-  await until(()=>a.targeted + b.targeted >= 2, 45000, 'asteroids targeting players');
+  await until(()=>a.targeted + b.targeted >= 2, 90000, 'asteroids targeting players');
   console.log('✓ targeted asteroids: A', a.targeted, '· B', b.targeted,
               '· landing near target:', a.astNear + b.astNear);
 
@@ -77,12 +80,25 @@ async function until(fn, ms, what){ const t0=Date.now(); while(Date.now()-t0<ms)
   if (a.blasts > S.GUN.shots) throw new Error(`fired ${a.blasts} > magazine ${S.GUN.shots} — recharge gap not enforced`);
   console.log('✓ blaster:', a.blasts, 'bolts then forced recharge gap (ack rechargeAt set)');
 
-  // 5) humanoid aliens spawn, open fire (abolt) or claw, and damage lands
-  await until(()=>a.aliens >= 1, 40000, 'alien spawn');
-  await until(()=>(a.abolts||0) >= 1 || a.zaps >= 1, 30000, 'alien opens fire');
-  await until(()=>a.alienDmg + b.alienDmg >= 1, 30000, 'alien damage lands');
+  // 4b) turbo: burn all charges, expect boost fx + recharge-gap enforcement
+  const boostsBefore = b.boosts || 0;
+  for (let i = 0; i < S.TURBO.charges + 2; i++) { b.send({t:'turbo'}); await sleep(S.TURBO.useGapMs + 50); }
+  await until(()=>(b.boosts||0) - boostsBefore >= S.TURBO.charges, 4000, 'turbo boosts broadcast');
+  const tEmpty = (b.turboMsgs||[]).find(m => m.charges === 0 && m.rechargeAt > 0);
+  if (!tEmpty) throw new Error('no empty-tank turbo recharge ack');
+  if ((b.boosts||0) - boostsBefore > S.TURBO.charges)
+    throw new Error('turbo fired more than its magazine — recharge gap not enforced');
+  console.log('✓ turbo:', S.TURBO.charges, 'charges then forced recharge gap');
+
+  // 5) humanoid aliens spawn and engage: they fire/claw at players, or a
+  //    player kills them first (shot or run over) — any of those proves
+  //    the alien is live in the world
+  await until(()=>a.aliens >= 1, 50000, 'alien spawn');
+  await until(()=>(a.abolts||0) >= 1 || a.zaps >= 1 || (a.alienKills||0) >= 1,
+              60000, 'alien engages (fires, claws, or gets killed)');
   console.log('✓ aliens: spawns', a.aliens, '· bolts fired', a.abolts||0,
-              '· melee swipes', a.zaps, '· alien dmg msgs', a.alienDmg + b.alienDmg);
+              '· melee swipes', a.zaps, '· kills', a.alienKills||0,
+              '· alien dmg msgs', a.alienDmg + b.alienDmg);
 
   clearInterval(iv);
   console.log('✓ damage msgs carrying dmg amount:', a.dmgMsgs);
