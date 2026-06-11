@@ -236,6 +236,24 @@
     headlamp.target.position.set(0, 0.1, 15);
     buggy.add(headlamp.target);
 
+    // Center-console control stick (the LRV T-handle). It leans with the
+    // pilot's throttle/steer inputs — the star of the first-person view (C).
+    const stickMat = new THREE.MeshStandardMaterial({ color: 0x2e3034, metalness: 0.45, roughness: 0.55 });
+    const stickBase = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.05, 0.09), stickMat);
+    stickBase.position.set(0, 0.76, 0.42);
+    buggy.add(stickBase);
+    const stickPivot = new THREE.Group();
+    stickPivot.position.set(0, 0.78, 0.42);
+    const stickShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.026, 0.3, 8), stickMat);
+    stickShaft.position.y = 0.15;
+    stickShaft.castShadow = true;
+    stickPivot.add(stickShaft);
+    const stickGrip = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.034, 0.05), MAT.fender);
+    stickGrip.position.y = 0.31;
+    stickGrip.castShadow = true;
+    stickPivot.add(stickGrip);
+    buggy.add(stickPivot);
+
     // --- Wheel footprint (drives physics + suspension/steer/spin animation).
     // Kept identical to the original sim; the pivots/spins are invisible rigging
     // nodes the GLB rides on, so syncBuggy()/remote.js animate them harmlessly.
@@ -278,7 +296,7 @@
     const rig = {
       group: buggy, MAT, WHEELS_LOCAL, wheelPivots, wheelSpins,
       WHEEL_REST_Y, headlamp, shieldMesh, placeholder, model: null,
-      _accent: accentHex, accentMats: [], modelWheels: null,
+      _accent: accentHex, accentMats: [], modelWheels: null, stickPivot,
       setLights, get lightsOn() { return lightsOn; },
     };
     attachModelTo(rig);   // swaps in the GLB now if loaded, else when it arrives
@@ -340,6 +358,7 @@
     if (k) { keys[k] = 1; e.preventDefault(); return; }
     if (e.code === 'KeyR') { if (G.net) G.net.send({ t: 'reqRespawn' }); }
     if (e.code === 'KeyL') { rig.setLights(!rig.lightsOn); }
+    if (e.code === 'KeyC') { if (G.toggleCamView) G.toggleCamView(); }
     if (e.code === 'KeyQ') { if (G.cycleItem) G.cycleItem(1); }
     if (e.code === 'KeyF') { if (G.fireGun) G.fireGun(); e.preventDefault(); }
     if (e.code === 'KeyE') { if (G.fireTurbo) G.fireTurbo(); e.preventDefault(); }
@@ -725,6 +744,14 @@
         w.spin.rotation.z += roll;
         if (w.front) w.steer.rotation.y = lerp(w.steer.rotation.y, steerA, sk);
       }
+    }
+
+    // control stick mirrors the pilot's hands: forward with throttle,
+    // sideways into the turn — matches the front wheels' steer sign
+    if (rig.stickPivot) {
+      const ks = 1 - Math.exp(-12 * dt);
+      rig.stickPivot.rotation.x = lerp(rig.stickPivot.rotation.x, rover.throttle * 0.42, ks);
+      rig.stickPivot.rotation.z = lerp(rig.stickPivot.rotation.z, -rover.steer * 0.38, ks);
     }
 
     // shield / invuln / dead visuals

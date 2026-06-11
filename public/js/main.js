@@ -93,6 +93,18 @@
   // is continuous when crossing the seam
   G.shiftCamera = (dx, dz) => { camPos.x += dx; camPos.z += dz; camLook.x += dx; camLook.z += dz; };
 
+  /* camera view: chase (default) ↔ first-person in the driver's seat (C) */
+  G.camMode = 'chase';
+  G.toggleCamView = () => {
+    G.camMode = G.camMode === 'chase' ? 'fp' : 'chase';
+    cameraSnap = true;
+    if (G.hud && G.hud.feed) G.hud.feed(G.camMode === 'fp' ? '🎥 cockpit view — C to switch back' : '🎥 chase view');
+  };
+  const _fpOff = new THREE.Vector3();
+  // cameras look down -Z while the rig drives +Z: flip 180°, then a hint of down-pitch
+  const _fpFlip = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+  const _fpPitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.06);
+
   function updateCamera(dt, now) {
     const rover = G.rover, camera = G.camera;
 
@@ -104,6 +116,31 @@
       camera.position.set(cx, G.terrainHeight(cx, cz) + 24, cz);
       camera.lookAt(g0.x, G.terrainHeight(g0.x, g0.z) + 4, g0.z);
       cameraSnap = true;
+      return;
+    }
+
+    if (G.camMode === 'fp' && G.myRig) {
+      // rigid driver's-seat view: ride the rig (heading, terrain tilt, bounce)
+      const grp = G.myRig.group;
+      const hSpeed = Math.hypot(rover.vel.x, rover.vel.z);
+      let shake = (rover.grounded ? clamp((hSpeed - 8.5) / 8, 0, 1) * 0.04 : 0) + shakeBudget * 0.6;
+      shakeBudget *= Math.exp(-3.5 * dt);
+      _fpOff.set(0.42, 1.58, -0.62).applyQuaternion(grp.quaternion);  // right seat, eye over the console
+      camera.position.set(
+        grp.position.x + _fpOff.x + (Math.random() - 0.5) * shake,
+        grp.position.y + _fpOff.y + (Math.random() - 0.5) * shake,
+        grp.position.z + _fpOff.z + (Math.random() - 0.5) * shake
+      );
+      camera.quaternion.copy(grp.quaternion).multiply(_fpFlip).multiply(_fpPitch);  // look ahead, hint of down
+      const boost = G.state.boostUntil > G.serverNow() ? 11 : 0;
+      const fovT = 70 + clamp((hSpeed - 5 + boost) / 9, 0, 1) * 9;
+      if (Math.abs(camera.fov - fovT) > 0.05) {
+        camera.fov = lerp(camera.fov, fovT, 1 - Math.exp(-3 * dt));
+        camera.updateProjectionMatrix();
+      }
+      G.dustMat.uniforms.uScale.value =
+        G.renderer.domElement.height / (2 * Math.tan(camera.fov * 0.5 * Math.PI / 180));
+      cameraSnap = true;   // chase re-snaps cleanly when toggled back
       return;
     }
 
