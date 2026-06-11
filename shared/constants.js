@@ -16,7 +16,7 @@
   /* ---------- world ------------------------------------------- */
   const WORLD = {
     terrainSize: 700,
-    gravity: 1.62,
+    gravity: 1.35,
     laps: 3,
     // open world: driving past ±wrapHalf comes out the opposite side (a
     // "whole moon" you can circumnavigate). The terrain mesh runs 10 units

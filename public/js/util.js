@@ -13,10 +13,10 @@ window.G = {};
   G.CFG = {
     terrainSize: 700,
     terrainSeg: 256,
-    gravity: 1.62,
-    maxSpeed: 14.0,
+    gravity: 1.35,
+    maxSpeed: 16.0,
     maxReverse: 5.0,
-    engineAccel: 7.0,
+    engineAccel: 7.6,
     brakeAccel: 12.0,
     rollResist: 0.22,
     latGrip: 2.6,
